@@ -1,0 +1,5 @@
+{
+  "name": "Nano Banana Storyboarder",
+  "description": "A node-based generative AI storyboard editor using Gemini Nano Banana models to explore creative variations.",
+  "requestFramePermissions": []
+}
