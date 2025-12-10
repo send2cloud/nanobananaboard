@@ -11,17 +11,16 @@ export enum NodeType {
 
 export enum Provider {
   GOOGLE = 'google',
-  OPENAI = 'openai',
   CUSTOM = 'custom', // Replaces OPENROUTER to be more generic/accurate
 }
 
 export interface AppSettings {
   provider: Provider;
   apiKey: string; // The currently active key
-  keys: Record<Provider, string>; // Per-provider key storage
+  keys: Record<string, string>; // Per-provider key storage
   baseUrl?: string; 
-  imageModel?: string; // Replaces modelOverride
-  textModel?: string; // New for suggestions
+  imageModel?: string; 
+  textModel?: string; 
   enableGoogle?: boolean; // Toggle for Google Models
 }
 

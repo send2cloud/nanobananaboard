@@ -268,7 +268,7 @@ const FlowEditor = () => {
                return {
                    ...n,
                    parentNode: groupId,
-                   extent: 'parent',
+                   extent: 'parent' as const,
                    position: {
                        x: n.position.x - groupX,
                        y: n.position.y - groupY

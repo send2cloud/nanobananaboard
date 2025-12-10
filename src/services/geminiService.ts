@@ -11,13 +11,13 @@ export const generateImageFromConfig = async (
   settings?: AppSettings,
   inputImage?: string 
 ): Promise<string> => {
-    // Default to Google if no settings provided, or if settings exist but no provider set
-    const providerType = settings?.provider || Provider.GOOGLE;
+    // Default to Custom/OpenRouter if no settings provided
+    const providerType = settings?.provider || Provider.CUSTOM;
     const provider = getProvider(providerType);
     
     // Ensure we have a valid settings object even if undefined passed
     const safeSettings: AppSettings = settings || { 
-        provider: Provider.GOOGLE, apiKey: '', keys: {} as any 
+        provider: Provider.CUSTOM, apiKey: '', keys: {} as any 
     };
 
     return await provider.generateImage(config, safeSettings, inputImage);
@@ -29,11 +29,11 @@ export const generateImageVariation = async (
   model: string = MODEL_OPTIONS.FLASH,
   settings?: AppSettings
 ): Promise<string> => {
-    const providerType = settings?.provider || Provider.GOOGLE;
+    const providerType = settings?.provider || Provider.CUSTOM;
     const provider = getProvider(providerType);
     
     const safeSettings: AppSettings = settings || { 
-        provider: Provider.GOOGLE, apiKey: '', keys: {} as any 
+        provider: Provider.CUSTOM, apiKey: '', keys: {} as any 
     };
 
     // For External, we prefer the imageModel from settings over the passed 'model' arg
