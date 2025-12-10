@@ -25,7 +25,10 @@ import {
   FolderOpen,
   FolderClosed,
   Unlink,
-  Server
+  Server,
+  Zap,
+  Box,
+  Sparkles
 } from 'lucide-react';
 import { 
   StartNodeData, 
@@ -40,7 +43,8 @@ import {
   SHOT_TYPES,
   CAMERA_ANGLES,
   LIGHTING_OPTS,
-  GenerationConfig
+  GenerationConfig,
+  Provider
 } from '../types';
 
 // --- Helper Components ---
@@ -82,13 +86,16 @@ export const StartNode: React.FC<NodeProps<StartNodeData>> = ({ data, selected }
   const [lighting, setLighting] = useState<string>('');
 
   const [showConfig, setShowConfig] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isGoogle = !data.provider || data.provider === Provider.GOOGLE;
 
   const handleGenerate = () => {
     if (!prompt.trim() && activeTab === 'text') return;
     
     const config: GenerationConfig = {
-      model,
+      model: isGoogle ? model : (data.globalModel || 'External'), // Use local selection only if Google
       aspectRatio,
       style,
       shotType,
@@ -100,13 +107,35 @@ export const StartNode: React.FC<NodeProps<StartNodeData>> = ({ data, selected }
     data.onGenerate(config);
   };
 
+  const handleMagicEnhance = async () => {
+    if (!prompt.trim() || !data.onEnhancePrompt) return;
+    setIsEnhancing(true);
+    try {
+        const config: GenerationConfig = {
+            model: isGoogle ? model : (data.globalModel || 'External'),
+            aspectRatio,
+            style,
+            shotType,
+            cameraAngle,
+            lighting,
+            prompt
+        };
+        const enhanced = await data.onEnhancePrompt(config);
+        setPrompt(enhanced);
+    } catch (e) {
+        console.error("Enhancement failed", e);
+    } finally {
+        setIsEnhancing(false);
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
          const config: GenerationConfig = {
-            model,
+            model: isGoogle ? model : (data.globalModel || 'External'),
             aspectRatio, 
             style: 'Varied',
             prompt: 'Uploaded Image',
@@ -136,12 +165,23 @@ export const StartNode: React.FC<NodeProps<StartNodeData>> = ({ data, selected }
 
       {activeTab === 'text' ? (
         <div className="space-y-4">
-          <textarea
-            className="w-full bg-zinc-950 border border-border rounded-lg p-3 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent resize-none h-32"
-            placeholder="Describe your shot (e.g., A cyberpunk detective in neon rain)..."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
+          <div className="relative">
+              <textarea
+                className={`w-full bg-zinc-950 border border-border rounded-lg p-3 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent resize-none h-32 pr-8 custom-scrollbar ${isEnhancing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                placeholder="Describe your shot (e.g., A cyberpunk detective in neon rain)..."
+                value={prompt}
+                disabled={isEnhancing}
+                onChange={(e) => setPrompt(e.target.value)}
+              />
+              <button 
+                  onClick={handleMagicEnhance}
+                  disabled={!prompt.trim() || isEnhancing || !data.onEnhancePrompt}
+                  className="absolute bottom-3 right-3 p-1.5 rounded-md text-zinc-500 hover:text-indigo-400 hover:bg-zinc-900 transition-all disabled:opacity-30 disabled:hover:text-zinc-500"
+                  title="Enhance Prompt with Magic"
+              >
+                  {isEnhancing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+              </button>
+          </div>
 
           {/* Configuration Accordion */}
           <div className="border border-border rounded-lg overflow-hidden bg-zinc-900/30">
@@ -154,7 +194,7 @@ export const StartNode: React.FC<NodeProps<StartNodeData>> = ({ data, selected }
                  <span>Configuration</span>
                  {!showConfig && (
                    <span className="text-[10px] text-zinc-600 ml-2 font-normal">
-                     {aspectRatio} • {model.includes('flash') ? 'Flash' : 'Pro'}
+                     {aspectRatio} • {isGoogle ? (model.includes('flash') ? 'Flash' : 'Pro') : 'External'}
                    </span>
                  )}
               </div>
@@ -164,17 +204,24 @@ export const StartNode: React.FC<NodeProps<StartNodeData>> = ({ data, selected }
             {showConfig && (
               <div className="p-3 border-t border-border space-y-4 animate-in slide-in-from-top-1 duration-200">
                  
-                 {/* Model */}
+                 {/* Model Selection - CONDITIONAL */}
                  <div>
                     <label className="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block">Model</label>
-                    <select 
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                      className="w-full bg-zinc-950 border border-border rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-600"
-                    >
-                      <option value={MODEL_OPTIONS.FLASH}>Gemini 2.5 Flash (Fast)</option>
-                      <option value={MODEL_OPTIONS.PRO}>Gemini 3 Pro (High Quality)</option>
-                    </select>
+                    {isGoogle ? (
+                        <select 
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                          className="w-full bg-zinc-950 border border-border rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-600"
+                        >
+                          <option value={MODEL_OPTIONS.FLASH}>Gemini 2.5 Flash (Fast)</option>
+                          <option value={MODEL_OPTIONS.PRO}>Gemini 3 Pro (High Quality)</option>
+                        </select>
+                    ) : (
+                        <div className="w-full bg-zinc-900/50 border border-zinc-800 rounded px-2 py-1.5 text-xs text-zinc-400 flex items-center gap-2 cursor-not-allowed">
+                             <Box className="w-3 h-3" />
+                             <span className="truncate">{data.globalModel || 'Using Global Setting'}</span>
+                        </div>
+                    )}
                  </div>
 
                  {/* Aspect Ratio */}
@@ -280,7 +327,42 @@ export const StartNode: React.FC<NodeProps<StartNodeData>> = ({ data, selected }
 // --- IMAGE NODE ---
 
 export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, selected }) => {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  // Logic to display model name nicely
+  let modelLabel = 'Nano Flash';
+  let badgeColor = 'bg-green-500';
+
+  if (data.generatedBy) {
+      const low = data.generatedBy.toLowerCase();
+      if (low.includes('pro')) {
+          modelLabel = 'Nano Pro';
+          badgeColor = 'bg-purple-500';
+      } else if (low.includes('dall')) {
+          modelLabel = 'DALL-E';
+          badgeColor = 'bg-blue-500';
+      } else if (low.includes('flash')) {
+          modelLabel = 'Nano Flash';
+          badgeColor = 'bg-green-500';
+      } else {
+          // Truncate long external IDs
+          modelLabel = data.generatedBy.split('/').pop()?.slice(0, 10) || 'External';
+          badgeColor = 'bg-orange-500';
+      }
+  }
+
+  // Handle ESC key to close lightbox
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightboxOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxOpen]);
+
   return (
+    <>
     <div className={`relative group rounded-2xl overflow-hidden bg-black border-2 transition-all duration-300 w-[320px] shadow-2xl ${selected ? 'border-accent shadow-accent/20' : 'border-zinc-800'}`}>
       <Handle type="target" position={Position.Left} className="!bg-zinc-500 !w-3 !h-3 !border-4 !border-black" />
       
@@ -289,12 +371,15 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
          <div className="absolute top-0 left-0 right-0 p-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-b from-black/80 to-transparent flex justify-between items-start pointer-events-none">
             <div className="flex gap-1">
                <span className="px-1.5 py-0.5 rounded bg-black/50 backdrop-blur text-[9px] text-white border border-white/10 uppercase">{data.config.aspectRatio}</span>
-               {data.config.model.includes('pro') && <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-200 border border-purple-500/30 text-[9px] uppercase">PRO</span>}
+               {modelLabel !== 'Nano Flash' && <span className={`px-1.5 py-0.5 rounded ${badgeColor}/20 text-white border ${badgeColor}/30 text-[9px] uppercase`}>{modelLabel}</span>}
             </div>
          </div>
       )}
 
-      <div className={`relative bg-zinc-900 flex items-center justify-center ${data.config?.aspectRatio === '9:16' ? 'aspect-[9/16]' : data.config?.aspectRatio === '16:9' ? 'aspect-video' : data.config?.aspectRatio === '4:3' ? 'aspect-[4/3]' : data.config?.aspectRatio === '3:4' ? 'aspect-[3/4]' : 'aspect-square'}`}>
+      <div 
+        className={`relative bg-zinc-900 flex items-center justify-center cursor-zoom-in ${data.config?.aspectRatio === '9:16' ? 'aspect-[9/16]' : data.config?.aspectRatio === '16:9' ? 'aspect-video' : data.config?.aspectRatio === '4:3' ? 'aspect-[4/3]' : data.config?.aspectRatio === '3:4' ? 'aspect-[3/4]' : 'aspect-square'}`}
+        onClick={() => !data.loading && data.imageUrl && setLightboxOpen(true)}
+      >
         {data.loading ? (
           <div className="flex flex-col items-center gap-2 text-zinc-500">
             <Loader2 className="w-8 h-8 animate-spin text-accent" />
@@ -303,9 +388,9 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
         ) : data.imageUrl ? (
           <>
              <img src={data.imageUrl} alt="Generated" className="w-full h-full object-cover" />
-             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
+             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 pointer-events-none">
                 <p className="text-white text-xs line-clamp-3 mb-3 font-light">{data.prompt}</p>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pointer-events-auto">
                    <button 
                      onClick={(e) => {
                         e.stopPropagation();
@@ -319,6 +404,16 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
                     >
                      <Download className="w-4 h-4" />
                    </button>
+                   <button 
+                     onClick={(e) => {
+                        e.stopPropagation();
+                        setLightboxOpen(true);
+                     }}
+                     className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors"
+                     title="Expand"
+                    >
+                     <Maximize2 className="w-4 h-4" />
+                   </button>
                 </div>
              </div>
           </>
@@ -330,9 +425,9 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
       {!data.loading && data.imageUrl && (
         <div className="p-3 bg-zinc-950 border-t border-zinc-800 flex justify-between items-center">
             <div className="flex items-center gap-1.5">
-                <div className={`w-2 h-2 rounded-full ${data.generatedBy?.includes('pro') ? 'bg-purple-500' : 'bg-green-500'}`}></div>
+                <div className={`w-2 h-2 rounded-full ${badgeColor}`}></div>
                 <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                  {data.generatedBy?.includes('pro') ? 'Nano Pro' : 'Nano Flash'}
+                  {modelLabel}
                 </span>
             </div>
             <button
@@ -347,6 +442,48 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
 
       <Handle type="source" position={Position.Right} className="!bg-accent !w-3 !h-3 !border-4 !border-black" />
     </div>
+
+    {/* SINGLE IMAGE LIGHTBOX */}
+    {lightboxOpen && data.imageUrl && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-md flex items-center justify-center animate-in fade-in duration-200">
+           {/* Close Button */}
+           <button 
+             onClick={() => setLightboxOpen(false)} 
+             className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-50"
+           >
+              <X className="w-6 h-6" />
+           </button>
+
+           {/* Main Content - Fill Viewport */}
+           <div className="w-full h-full p-8 flex flex-col items-center justify-center">
+              <div className="flex-1 w-full h-full flex items-center justify-center overflow-hidden">
+                 <img 
+                    src={data.imageUrl} 
+                    alt="Lightbox View" 
+                    className="max-w-full max-h-full object-contain drop-shadow-2xl" 
+                 />
+              </div>
+
+              {/* Simple Footer */}
+              <div className="mt-6 flex items-center gap-6 shrink-0">
+                 <p className="text-sm text-zinc-400 max-w-lg truncate text-center">{data.prompt}</p>
+                 <div className="h-4 w-px bg-zinc-800"></div>
+                 <button 
+                    onClick={() => {
+                        data.onAddVariation && data.onAddVariation(id);
+                        setLightboxOpen(false);
+                    }}
+                    className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors"
+                 >
+                    <GitBranch className="w-4 h-4" />
+                    Variations
+                 </button>
+              </div>
+           </div>
+        </div>,
+        document.body
+    )}
+    </>
   );
 };
 
@@ -428,36 +565,36 @@ export const GridNode: React.FC<NodeProps<GridNodeData>> = ({ id, data, selected
         <Handle type="source" position={Position.Right} className="!bg-accent !w-3 !h-3 !border-4 !border-black" />
       </div>
 
-      {/* LIGHTBOX PORTAL */}
+      {/* LIGHTBOX PORTAL (GRID) */}
       {lightboxOpen && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-md flex items-center justify-center animate-in fade-in duration-200">
            {/* Close Button */}
-           <button onClick={closeLightbox} className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors">
+           <button onClick={closeLightbox} className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-50">
               <X className="w-6 h-6" />
            </button>
 
-           {/* Main Content */}
-           <div className="w-full max-w-7xl h-full p-12 flex flex-col items-center justify-center relative">
+           {/* Main Content - FILL VIEWPORT */}
+           <div className="w-full h-full p-8 flex flex-col items-center justify-center relative">
               
-              {/* Image Container */}
-              <div className="relative max-h-[80vh] flex items-center justify-center">
+              {/* Image Container - Maximized */}
+              <div className="flex-1 w-full h-full flex items-center justify-center overflow-hidden relative">
                  <img 
                     src={currentImage.url} 
                     alt="Lightbox View" 
-                    className="max-h-[80vh] max-w-full rounded-lg shadow-2xl border border-white/10" 
+                    className="max-w-full max-h-full object-contain drop-shadow-2xl" 
                  />
                  
-                 {/* Navigation Buttons (Floating) */}
-                 <button onClick={prevImage} className="absolute -left-16 p-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-colors">
+                 {/* Navigation Buttons (Floating Next to Image) */}
+                 <button onClick={prevImage} className="absolute left-4 md:left-10 p-4 rounded-full bg-black/40 hover:bg-black/60 border border-white/10 text-white transition-colors backdrop-blur-md">
                     <ChevronLeft className="w-8 h-8" />
                  </button>
-                 <button onClick={nextImage} className="absolute -right-16 p-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-colors">
+                 <button onClick={nextImage} className="absolute right-4 md:right-10 p-4 rounded-full bg-black/40 hover:bg-black/60 border border-white/10 text-white transition-colors backdrop-blur-md">
                     <ChevronRight className="w-8 h-8" />
                  </button>
               </div>
 
               {/* Footer Controls */}
-              <div className="mt-8 flex items-center gap-6">
+              <div className="mt-4 flex items-center gap-6 shrink-0 z-50">
                  <div className="text-center">
                     <p className="text-sm text-zinc-400 font-mono mb-1">{lightboxIndex + 1} / {data.images.length}</p>
                     <p className="text-xs text-zinc-600 max-w-md truncate">{currentImage.prompt}</p>
@@ -495,21 +632,60 @@ const CATEGORIES = [
 
 export const VariationNode: React.FC<NodeProps<VariationNodeData>> = ({ id, data, selected }) => {
   const [category, setCategory] = useState<VariationCategory>(VariationCategory.CAMERA);
-  const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState<string>(MODEL_OPTIONS.FLASH);
-  const [count, setCount] = useState(4); // Default 4 for grid
+  const [count, setCount] = useState(4); 
+  // Store prompts for each variation. Default to empty strings or pre-filled generic
+  const [prompts, setPrompts] = useState<string[]>(Array(4).fill(''));
+  const [isSuggesting, setIsSuggesting] = useState(false);
+
+  // Update prompt array size when count changes
+  useEffect(() => {
+    setPrompts(prev => {
+        const newArr = Array(count).fill('');
+        for(let i=0; i < Math.min(prev.length, count); i++) {
+            newArr[i] = prev[i];
+        }
+        return newArr;
+    });
+  }, [count]);
 
   const handleRun = () => {
+    // Fill empty prompts with generic fallback if user didn't type anything
+    const finalPrompts = prompts.map((p, i) => p.trim() || `${category} Variation ${i+1}`);
     data.onGenerate(id, {
       category,
-      prompt,
-      count,
-      model
+      prompts: finalPrompts,
+      model: 'Inherit' 
     });
   };
 
+  const handleMagicSuggest = async () => {
+     if (!data.onSuggest) return;
+     setIsSuggesting(true);
+     try {
+         const suggestions = await data.onSuggest(category, count, data.parentPrompt || '');
+         // Fill prompts with suggestions, padding with empty if needed
+         setPrompts(prev => {
+             const newPrompts = [...prev];
+             suggestions.forEach((s, i) => {
+                 if (i < newPrompts.length) newPrompts[i] = s;
+             });
+             return newPrompts;
+         });
+     } catch (e) {
+         console.error("Suggestion failed", e);
+     } finally {
+         setIsSuggesting(false);
+     }
+  };
+
+  const updatePrompt = (index: number, text: string) => {
+      const newPrompts = [...prompts];
+      newPrompts[index] = text;
+      setPrompts(newPrompts);
+  };
+
   return (
-    <NodeWrapper selected={selected} title="Configuration">
+    <NodeWrapper selected={selected} title="Configuration" width="w-[380px]">
       <Handle type="target" position={Position.Left} className="!bg-zinc-500 !w-3 !h-3 !border-4 !border-surface" />
       
       {/* Category Selector */}
@@ -530,31 +706,8 @@ export const VariationNode: React.FC<NodeProps<VariationNodeData>> = ({ id, data
         ))}
       </div>
 
-      {/* Model Selector */}
-      <div className="mb-3">
-         <select 
-            value={model} 
-            onChange={(e) => setModel(e.target.value)}
-            className="w-full bg-zinc-950 border border-border rounded-md px-2 py-1.5 text-xs text-zinc-400 focus:outline-none focus:border-zinc-600"
-         >
-            <option value={MODEL_OPTIONS.FLASH}>Nano Banana (Flash)</option>
-            <option value={MODEL_OPTIONS.PRO}>Nano Banana Pro</option>
-         </select>
-      </div>
-
-      {/* Prompt Input */}
-      <div className="mb-4 space-y-2">
-        <label className="text-xs text-zinc-500 font-medium ml-1">Directive</label>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder={`e.g., "Low angle shot from below"`}
-          className="w-full bg-zinc-950 border border-border rounded-lg p-3 text-sm text-zinc-200 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent resize-none h-20 placeholder-zinc-700"
-        />
-      </div>
-
-      {/* Controls */}
-      <div className="flex items-center justify-between pt-2 border-t border-border">
+      {/* Controls: Count & Magic */}
+      <div className="flex items-center justify-between mb-3 px-1">
          <div className="flex items-center gap-2 bg-zinc-950 rounded-md p-1 border border-border">
              <button 
                 onClick={() => setCount(Math.max(1, count - 1))}
@@ -567,13 +720,40 @@ export const VariationNode: React.FC<NodeProps<VariationNodeData>> = ({ id, data
              >+</button>
          </div>
 
+         <button 
+            onClick={handleMagicSuggest}
+            disabled={isSuggesting}
+            className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-400 hover:to-purple-400 text-white rounded-md text-[10px] font-bold uppercase tracking-wide transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50"
+         >
+            {isSuggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3 fill-current" />}
+            Suggest
+         </button>
+      </div>
+
+      {/* Dynamic Input List */}
+      <div className="space-y-2 mb-4 max-h-[240px] overflow-y-auto pr-1 custom-scrollbar">
+         {prompts.map((p, idx) => (
+             <div key={idx} className="relative group">
+                 <span className="absolute left-3 top-2.5 text-[10px] text-zinc-600 font-mono">{idx + 1}</span>
+                 <input
+                    value={p}
+                    onChange={(e) => updatePrompt(idx, e.target.value)}
+                    placeholder={`Variation ${idx + 1}...`}
+                    className="w-full bg-zinc-950/50 border border-border rounded-md py-2 pl-7 pr-2 text-xs text-zinc-300 focus:outline-none focus:border-accent focus:bg-zinc-950 transition-colors placeholder-zinc-700"
+                 />
+             </div>
+         ))}
+      </div>
+
+      {/* Footer Run Button */}
+      <div className="pt-2 border-t border-border">
          <button
             onClick={handleRun}
-            disabled={data.loading || !prompt}
-            className="px-4 py-1.5 bg-white text-black text-xs font-bold rounded-lg hover:bg-zinc-200 flex items-center gap-2 transition-colors disabled:opacity-50"
+            disabled={data.loading}
+            className="w-full py-2 bg-white text-black text-xs font-bold rounded-lg hover:bg-zinc-200 flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
          >
             {data.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3 fill-current" />}
-            Run
+            Generate All
          </button>
       </div>
 

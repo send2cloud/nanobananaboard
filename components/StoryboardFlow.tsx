@@ -27,12 +27,12 @@ import {
   AppSettings,
   Provider
 } from '../types';
-import { generateImageFromConfig, generateImageVariation } from '../services/geminiService';
-import { Settings, X, Layers, AlertCircle, RefreshCw } from 'lucide-react';
+import { generateImageFromConfig, generateImageVariation, getVariationSuggestions, enhancePrompt } from '../services/geminiService';
+import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, ChevronDown, ChevronUp } from 'lucide-react';
 
 const NODE_WIDTH = 400;
 const NODE_HEIGHT = 400;
-const STORAGE_KEY = 'nano_banana_settings';
+const STORAGE_KEY = 'nano_banana_settings_v2'; // Changed key to force migration
 
 const initialNodes: Node[] = [
   {
@@ -50,58 +50,119 @@ const FlowEditor = () => {
 
   // --- Global App Settings ---
   const [showSettings, setShowSettings] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
+    const defaultKeys = {
+        [Provider.GOOGLE]: '',
+        [Provider.OPENAI]: '',
+        [Provider.CUSTOM]: ''
+    };
+
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
+      
+      // Attempt to load new V2 settings
       if (stored && stored !== 'undefined' && stored !== 'null') {
         const parsed = JSON.parse(stored);
-        // Ensure valid default provider if corrupted
-        if (!parsed.provider) parsed.provider = Provider.GOOGLE;
+        // Ensure keys object exists
+        if (!parsed.keys) parsed.keys = defaultKeys;
         return parsed;
       }
+
+      // Fallback: Try to migrate old settings
+      const oldStored = localStorage.getItem('nano_banana_settings');
+      if (oldStored && oldStored !== 'undefined') {
+          const oldParsed = JSON.parse(oldStored);
+          const initialKeys = { ...defaultKeys };
+          
+          // If they had a key and provider set, assign it to that provider
+          if (oldParsed.apiKey && oldParsed.provider) {
+             initialKeys[oldParsed.provider as Provider] = oldParsed.apiKey;
+          }
+
+          return {
+              provider: oldParsed.provider || Provider.GOOGLE,
+              apiKey: oldParsed.apiKey || '',
+              keys: initialKeys,
+              baseUrl: oldParsed.baseUrl || '',
+              imageModel: oldParsed.imageModel || '',
+              textModel: oldParsed.textModel || ''
+          };
+      }
+
     } catch (e) {
       console.error("Failed to load settings from storage", e);
     }
+
     return {
       provider: Provider.GOOGLE,
       apiKey: '',
+      keys: defaultKeys,
       baseUrl: '',
+      imageModel: '',
+      textModel: ''
     };
   });
+
+  // --- AUTO-SAVE SETTINGS ---
+  // Saves to local storage immediately whenever appSettings changes
+  useEffect(() => {
+    setIsSaving(true);
+    const timer = setTimeout(() => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(appSettings));
+            setIsSaving(false);
+        } catch (e) {
+            console.error("Failed to save settings to local storage", e);
+            setIsSaving(false);
+        }
+    }, 500); // Debounce save visual
+    return () => clearTimeout(timer);
+  }, [appSettings]);
+
+  // Clear notification after 3 seconds
+  useEffect(() => {
+    if (notification) {
+        const timer = setTimeout(() => setNotification(null), 3000);
+        return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   // Use refs for callbacks to avoid stale closures in React Flow handlers
   const handleAddVariationRef = useRef<(id: string) => void>(() => {});
   const handleBranchRef = useRef<(imageUrl: string, prompt: string, parentId: string) => void>(() => {});
   const handleUngroupRef = useRef<(id: string) => void>(() => {});
   const handleToggleCollapseRef = useRef<(id: string, collapsed: boolean) => void>(() => {});
+  const handleSuggestRef = useRef<(category: string, count: number, context: string) => Promise<string[]>>((c, n, ctx) => Promise.resolve([]));
+  const handleEnhanceRef = useRef<(config: GenerationConfig) => Promise<string>>(() => Promise.resolve(""));
   const appSettingsRef = useRef<AppSettings>(appSettings);
 
   // Update ref when settings change
   useEffect(() => {
     appSettingsRef.current = appSettings;
     
-    // Also update StartNode visualization
+    // Update StartNode visualization to reflect Global Settings
     setNodes(nds => nds.map(n => {
         if (n.type === NodeType.START) {
             let providerName = 'Nano Banana';
             if (appSettings.provider === Provider.OPENAI) providerName = 'OpenAI';
-            if (appSettings.provider === Provider.CUSTOM) providerName = 'Custom';
+            if (appSettings.provider === Provider.CUSTOM) providerName = 'OpenRouter';
             
-            return { ...n, data: { ...n.data, activeProvider: providerName } };
+            return { 
+                ...n, 
+                data: { 
+                    ...n.data, 
+                    activeProvider: providerName,
+                    provider: appSettings.provider,
+                    globalModel: appSettings.imageModel 
+                } 
+            };
         }
         return n;
     }));
   }, [appSettings, setNodes]);
-
-  const handleSaveSettings = () => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(appSettings));
-    } catch (e) {
-      console.error("Failed to save settings", e);
-      alert("Warning: Could not save settings to local storage.");
-    }
-    setShowSettings(false);
-  };
 
   const nodeTypes = useMemo(() => ({
     [NodeType.START]: StartNode,
@@ -260,6 +321,14 @@ const FlowEditor = () => {
 
   // --- Handlers ---
 
+  const handleSuggestVariations = useCallback(async (category: string, count: number, context: string) => {
+      return await getVariationSuggestions(context, category, count, appSettingsRef.current);
+  }, []);
+
+  const handleEnhancePrompt = useCallback(async (config: GenerationConfig) => {
+      return await enhancePrompt(config, appSettingsRef.current);
+  }, []);
+
   const handleBranch = useCallback((imageUrl: string, prompt: string, parentId: string) => {
     const currentNodes = getNodes();
     const parentNode = currentNodes.find(n => n.id === parentId);
@@ -300,11 +369,25 @@ const FlowEditor = () => {
      const variationNode = currentNodes.find(n => n.id === nodeId);
      if(!variationNode) return;
 
+     // Smart Model Inheritance
+     let modelToUse = config.model; // Default from UI (Flash)
+
+     const currentProvider = appSettingsRef.current.provider;
+     
+     const parentNode = currentNodes.find(n => n.id === variationNode.data.parentId);
+     if (parentNode && parentNode.type === NodeType.IMAGE) {
+         const parentModel = (parentNode.data as ImageNodeData).generatedBy;
+         if (currentProvider === Provider.GOOGLE && parentModel) {
+             modelToUse = parentModel;
+         }
+     }
+
      try {
         const promises = [];
-        for(let i=0; i<config.count; i++) {
-            const prompt = `Change category: ${config.category}. Specifics: ${config.prompt}. Variation ${i+1}`;
-            promises.push(generateImageVariation(variationNode.data.parentImage, prompt, config.model, appSettingsRef.current));
+        for(let i=0; i<config.prompts.length; i++) {
+            const specificPrompt = config.prompts[i];
+            const finalPrompt = `Change category: ${config.category}. Directive: ${specificPrompt}.`;
+            promises.push(generateImageVariation(variationNode.data.parentImage, finalPrompt, modelToUse, appSettingsRef.current));
         }
 
         const results = await Promise.all(promises);
@@ -325,7 +408,7 @@ const FlowEditor = () => {
                 images: results.map((url, idx) => ({
                     id: `img-${idx}`,
                     url,
-                    prompt: `${config.category}: ${config.prompt}`
+                    prompt: config.prompts[idx] || `${config.category} Variation`
                 })),
                 parentId: nodeId,
                 config,
@@ -385,7 +468,9 @@ const FlowEditor = () => {
             data: {
                 parentId,
                 parentImage: parentNode.data.imageUrl!,
-                onGenerate: handleRunVariation
+                parentPrompt: parentNode.data.prompt || '',
+                onGenerate: handleRunVariation,
+                onSuggest: handleSuggestRef.current
             }
         };
         
@@ -426,6 +511,11 @@ const FlowEditor = () => {
         const newPos = findPositionForNewNode(currentNodes, startNode);
         const newImageNodeId = `img-${Date.now()}`;
         
+        let generatedBy = config.model;
+        if (appSettingsRef.current.provider !== Provider.GOOGLE) {
+            generatedBy = appSettingsRef.current.imageModel || 'External Model';
+        }
+        
         const newImageNode: Node<ImageNodeData> = {
             id: newImageNodeId,
             type: NodeType.IMAGE,
@@ -436,7 +526,7 @@ const FlowEditor = () => {
                 config: config,
                 onAddVariation: handleAddVariation,
                 loading: false,
-                generatedBy: config.model
+                generatedBy: generatedBy
             }
         };
 
@@ -474,18 +564,20 @@ const FlowEditor = () => {
     handleBranchRef.current = handleBranch;
     handleUngroupRef.current = handleUngroup;
     handleToggleCollapseRef.current = handleToggleCollapse;
-  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse]);
+    handleSuggestRef.current = handleSuggestVariations;
+    handleEnhanceRef.current = handleEnhancePrompt;
+  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt]);
 
   useEffect(() => {
     setNodes((nds) => nds.map(n => {
-        if (n.type === NodeType.START) return { ...n, data: { ...n.data, onGenerate: handleInitialGenerate } };
+        if (n.type === NodeType.START) return { ...n, data: { ...n.data, onGenerate: handleInitialGenerate, onEnhancePrompt: handleEnhancePrompt } };
         if (n.type === NodeType.IMAGE) return { ...n, data: { ...n.data, onAddVariation: handleAddVariation } };
-        if (n.type === NodeType.VARIATION) return { ...n, data: { ...n.data, onGenerate: handleRunVariation } };
+        if (n.type === NodeType.VARIATION) return { ...n, data: { ...n.data, onGenerate: handleRunVariation, onSuggest: handleSuggestVariations } };
         if (n.type === NodeType.GRID) return { ...n, data: { ...n.data, onBranch: handleBranch } };
         if (n.type === NodeType.GROUP) return { ...n, data: { ...n.data, onUngroup: handleUngroup, onToggleCollapse: handleToggleCollapse } };
         return n;
     }));
-  }, [handleInitialGenerate, handleAddVariation, handleRunVariation, handleBranch, handleUngroup, handleToggleCollapse, setNodes]);
+  }, [handleInitialGenerate, handleAddVariation, handleRunVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, setNodes]);
 
 
   return (
@@ -504,7 +596,6 @@ const FlowEditor = () => {
         <Background color="#27272a" gap={24} size={1} variant={BackgroundVariant.Dots} />
         <Controls className="bg-surface border border-border rounded-lg overflow-hidden shadow-xl" />
         
-        {/* Top Right Panel: Grouping Actions & Settings Trigger */}
         <Panel position="top-right" className="flex gap-2">
            <button 
              onClick={handleCreateGroup}
@@ -523,7 +614,6 @@ const FlowEditor = () => {
         </Panel>
       </ReactFlow>
       
-      {/* Overlay Title */}
       <div className="absolute top-6 left-6 pointer-events-none">
         <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <span className="w-3 h-8 bg-yellow-400 rounded-full block rotate-12"></span>
@@ -532,7 +622,15 @@ const FlowEditor = () => {
         <p className="text-zinc-500 text-sm mt-1">Node-based Generative AI Workflow</p>
       </div>
 
-      {/* Settings Modal */}
+      {notification && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-bottom-5 duration-300">
+           <div className="bg-green-600 text-white px-4 py-3 rounded-lg shadow-2xl flex items-center gap-3 font-medium">
+              <CheckCircle2 className="w-5 h-5" />
+              {notification}
+           </div>
+        </div>
+      )}
+
       {showSettings && (
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-surface border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -553,21 +651,28 @@ const FlowEditor = () => {
                          <button
                            key={p}
                            onClick={() => setAppSettings(prev => {
-                               // Default URLs and Models when switching
-                               let newUrl = prev.baseUrl;
-                               let newModel = prev.modelOverride;
+                               let newImgModel = prev.imageModel;
+                               let newTxtModel = prev.textModel;
 
                                if (p === Provider.OPENAI) {
-                                   newUrl = 'https://api.openai.com/v1/images/generations';
-                                   newModel = 'dall-e-3'; 
+                                   newImgModel = 'dall-e-3'; 
+                                   newTxtModel = 'gpt-4o';
                                }
                                if (p === Provider.CUSTOM) {
-                                   // Default to OpenRouter Chat endpoint for Gemini model
-                                   newUrl = 'https://openrouter.ai/api/v1/chat/completions';
-                                   newModel = 'google/gemini-3-pro-image-preview';
+                                   newImgModel = 'google/gemini-3-pro-image-preview';
+                                   newTxtModel = 'google/gemini-2.5-flash';
                                }
                                
-                               return { ...prev, provider: p, baseUrl: newUrl, modelOverride: newModel };
+                               // Load key for this provider from storage dictionary
+                               const restoredKey = prev.keys[p] || '';
+
+                               return { 
+                                   ...prev, 
+                                   provider: p,
+                                   apiKey: restoredKey, // Set active key
+                                   imageModel: newImgModel,
+                                   textModel: newTxtModel 
+                                };
                            })}
                            className={`py-2 px-3 rounded-lg text-xs font-bold uppercase transition-all border ${
                               appSettings.provider === p 
@@ -575,58 +680,70 @@ const FlowEditor = () => {
                                 : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-600'
                            }`}
                          >
-                           {p === Provider.GOOGLE ? 'Nano Banana' : p === Provider.CUSTOM ? 'Custom/Router' : p}
+                           {p === Provider.GOOGLE ? 'Nano Banana' : p === Provider.CUSTOM ? 'OpenRouter' : p}
                          </button>
                       ))}
                    </div>
                 </div>
 
                 <div className="space-y-4 animate-in slide-in-from-top-2">
-                    <div className="p-3 bg-yellow-900/20 border border-yellow-700/30 rounded-lg flex gap-3">
-                        <AlertCircle className="w-5 h-5 text-yellow-500 shrink-0" />
-                        <p className="text-xs text-yellow-200/80">
-                            API Keys are stored locally in your browser and are never sent to our servers.
+                    <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg flex gap-3 items-start">
+                        <AlertCircle className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
+                        <p className="text-xs text-zinc-400">
+                            Settings are saved per-provider automatically.
                         </p>
                     </div>
                     
                     <div>
-                        <label className="block text-sm font-medium text-zinc-400 mb-2">API Key {appSettings.provider === Provider.GOOGLE && '(Optional)'}</label>
+                        <div className="flex justify-between mb-2">
+                            <label className="text-sm font-medium text-zinc-400">
+                                {appSettings.provider === Provider.GOOGLE ? 'Google AI Studio Key' : 
+                                 appSettings.provider === Provider.OPENAI ? 'OpenAI API Key' : 
+                                 'OpenRouter API Key'}
+                            </label>
+                            <span className={`text-[10px] flex items-center gap-1 font-medium transition-colors ${isSaving ? 'text-zinc-500' : 'text-green-500'}`}>
+                                {isSaving ? 'Saving...' : 'Saved'} 
+                                {!isSaving && <CheckCircle2 className="w-3 h-3" />}
+                            </span>
+                        </div>
                         <input 
                             type="password" 
                             value={appSettings.apiKey}
-                            onChange={(e) => setAppSettings(prev => ({ ...prev, apiKey: e.target.value }))}
-                            placeholder={appSettings.provider === Provider.GOOGLE ? "Leave empty to use default env key" : "Enter API Key"}
+                            onChange={(e) => {
+                                const newVal = e.target.value;
+                                setAppSettings(prev => ({ 
+                                    ...prev, 
+                                    apiKey: newVal, // Update Active
+                                    keys: { ...prev.keys, [prev.provider]: newVal } // Update Storage
+                                }));
+                            }}
+                            placeholder={appSettings.provider === Provider.GOOGLE ? "Leave empty to use default env key" : "sk-..."}
                             className="w-full bg-zinc-950 border border-border rounded-lg p-2.5 text-sm text-white focus:border-accent focus:ring-1 focus:ring-accent outline-none"
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-zinc-400 mb-2">Base URL</label>
-                        <input 
-                            type="text" 
-                            value={appSettings.baseUrl || ''}
-                            onChange={(e) => setAppSettings(prev => ({ ...prev, baseUrl: e.target.value }))}
-                            placeholder="https://api.openai.com/v1/images/generations"
-                            className="w-full bg-zinc-950 border border-border rounded-lg p-2.5 text-sm text-white focus:border-accent focus:ring-1 focus:ring-accent outline-none placeholder-zinc-700 font-mono"
-                        />
-                        {appSettings.provider !== Provider.GOOGLE && (
-                            <p className="text-[10px] text-zinc-500 mt-1">
-                                For OpenRouter Gemini: https://openrouter.ai/api/v1/chat/completions<br/>
-                                For Standard OpenAI: https://api.openai.com/v1/images/generations
-                            </p>
-                        )}
-                    </div>
-
                     {appSettings.provider !== Provider.GOOGLE && (
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-400 mb-2">Model ID Override (Optional)</label>
-                            <input 
-                                type="text" 
-                                value={appSettings.modelOverride || ''}
-                                onChange={(e) => setAppSettings(prev => ({ ...prev, modelOverride: e.target.value }))}
-                                placeholder={appSettings.provider === Provider.OPENAI ? "dall-e-3" : "google/gemini-3-pro-image-preview"}
-                                className="w-full bg-zinc-950 border border-border rounded-lg p-2.5 text-sm text-white focus:border-accent focus:ring-1 focus:ring-accent outline-none placeholder-zinc-700"
-                            />
+                        <div className="grid grid-cols-1 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-400 mb-2">Image Model</label>
+                                <input 
+                                    type="text" 
+                                    value={appSettings.imageModel || ''}
+                                    onChange={(e) => setAppSettings(prev => ({ ...prev, imageModel: e.target.value }))}
+                                    placeholder="google/gemini-3-pro-image-preview"
+                                    className="w-full bg-zinc-950 border border-border rounded-lg p-2.5 text-sm text-white focus:border-accent focus:ring-1 focus:ring-accent outline-none placeholder-zinc-700"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-400 mb-2">Text/Suggestion Model</label>
+                                <input 
+                                    type="text" 
+                                    value={appSettings.textModel || ''}
+                                    onChange={(e) => setAppSettings(prev => ({ ...prev, textModel: e.target.value }))}
+                                    placeholder="google/gemini-2.5-flash"
+                                    className="w-full bg-zinc-950 border border-border rounded-lg p-2.5 text-sm text-white focus:border-accent focus:ring-1 focus:ring-accent outline-none placeholder-zinc-700"
+                                />
+                            </div>
                         </div>
                     )}
                 </div>
@@ -634,9 +751,14 @@ const FlowEditor = () => {
 
              <div className="p-4 bg-zinc-900/50 border-t border-border flex justify-end">
                 <button 
-                  onClick={handleSaveSettings}
-                  className="px-4 py-2 bg-white text-black font-bold rounded-lg hover:bg-zinc-200 text-sm"
+                  onClick={() => {
+                      localStorage.setItem(STORAGE_KEY, JSON.stringify(appSettings));
+                      setNotification("Settings Saved to Local Storage");
+                      setShowSettings(false);
+                  }}
+                  className="px-6 py-2 bg-accent hover:bg-blue-600 text-white font-bold rounded-lg transition-colors text-sm flex items-center gap-2 shadow-lg shadow-blue-500/20"
                 >
+                  <Save className="w-4 h-4" />
                   Save & Close
                 </button>
              </div>

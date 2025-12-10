@@ -16,9 +16,11 @@ export enum Provider {
 
 export interface AppSettings {
   provider: Provider;
-  apiKey: string;
-  baseUrl?: string; // New field for custom endpoints
-  modelOverride?: string;
+  apiKey: string; // The currently active key
+  keys: Record<Provider, string>; // Per-provider key storage
+  baseUrl?: string; 
+  imageModel?: string; // Replaces modelOverride
+  textModel?: string; // New for suggestions
 }
 
 export interface GenerationConfig {
@@ -43,14 +45,19 @@ export interface ImageNodeData {
 export interface VariationNodeData {
   parentId: string;
   parentImage: string;
+  parentPrompt: string; // Context for AI suggestions
   onGenerate: (id: string, config: VariationConfig) => void;
+  onSuggest: (category: string, count: number, parentPrompt: string) => Promise<string[]>; // AI Suggestion Callback
   loading?: boolean;
 }
 
 export interface StartNodeData {
   onGenerate: (config: GenerationConfig, image?: string) => void;
+  onEnhancePrompt?: (config: GenerationConfig) => Promise<string>; // New Magic Wand callback
   loading?: boolean;
   activeProvider?: string; // Visual feedback
+  provider?: Provider; // Explicit provider enum
+  globalModel?: string; // Explicit global model ID
 }
 
 export interface GridNodeData {
@@ -75,8 +82,7 @@ export interface GroupNodeData {
 
 export interface VariationConfig {
   category: string;
-  prompt: string;
-  count: number;
+  prompts: string[]; // Changed from single prompt to specific prompts
   model: string;
 }
 

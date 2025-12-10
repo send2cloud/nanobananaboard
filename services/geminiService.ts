@@ -2,6 +2,8 @@ import { GoogleGenAI } from "@google/genai";
 import { MODEL_OPTIONS, GenerationConfig, AppSettings, Provider } from '../types';
 
 const getAiClient = (apiKey?: string) => {
+  // If the user provided a key via settings, use it. Otherwise fall back to ENV.
+  // Note: Only call this if you INTEND to use the Google SDK.
   return new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY });
 };
 
@@ -16,6 +18,146 @@ const constructDetailedPrompt = (config: GenerationConfig): string => {
   
   return parts.join(', ');
 };
+
+// --- TEXT GENERATION (For Intelligent Suggestions) ---
+
+export const generateText = async (
+    prompt: string, 
+    systemInstruction: string,
+    settings: AppSettings
+): Promise<string> => {
+    const provider = settings.provider || Provider.GOOGLE;
+    const apiKey = settings.apiKey;
+    
+    const googleTextModel = 'gemini-2.5-flash';
+    const externalTextModel = settings.textModel || 'google/gemini-2.5-flash';
+
+    // STRICT CHECK: If user wants Custom/OpenRouter, DO NOT use Google SDK.
+    if (provider === Provider.GOOGLE) {
+        const ai = getAiClient(apiKey);
+        try {
+            const response = await ai.models.generateContent({
+                model: googleTextModel,
+                contents: prompt,
+                config: { systemInstruction }
+            });
+            return response.text || '';
+        } catch (e) {
+            console.error("Gemini Text Gen Error:", e);
+            throw e;
+        }
+    } else {
+        // OpenRouter / OpenAI Text Generation
+        // NOTE: We don't have baseUrl in settings anymore, so we default based on provider
+        let baseUrl = provider === Provider.OPENAI ? 'https://api.openai.com/v1' : 'https://openrouter.ai/api/v1';
+        
+        // Robust Normalization
+        baseUrl = baseUrl.trim().replace(/\/+$/, "");
+        
+        let endpoint = baseUrl;
+        if (!endpoint.includes('/chat/completions')) {
+             endpoint = `${endpoint}/chat/completions`;
+        }
+
+        if (!apiKey) {
+            throw new Error(`API Key is missing for ${provider}. Please check Settings.`);
+        }
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
+                    ...(provider === Provider.CUSTOM ? {
+                        'HTTP-Referer': window.location.origin,
+                        'X-Title': 'Nano Banana Storyboarder'
+                    } : {})
+                },
+                body: JSON.stringify({
+                    model: externalTextModel,
+                    messages: [
+                        { role: 'system', content: systemInstruction },
+                        { role: 'user', content: prompt }
+                    ]
+                })
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Text Gen Failed: ${response.status} - ${errText}`);
+            }
+
+            const data = await response.json();
+            return data.choices?.[0]?.message?.content || '';
+        } catch (e) {
+            console.error("External Text Gen Error:", e);
+            throw e;
+        }
+    }
+};
+
+export const getVariationSuggestions = async (
+    parentPrompt: string, 
+    category: string, 
+    count: number, 
+    settings: AppSettings
+): Promise<string[]> => {
+    const systemPrompt = `You are a creative storyboard assistant. 
+    Your task is to generate distinct, creative variations for a shot description based on a specific category.
+    Return ONLY a JSON array of strings. Do not include markdown formatting like \`\`\`json.
+    Example: ["Low angle looking up", "Top down view", "Dutch angle"]`;
+
+    const userPrompt = `Context: "${parentPrompt}"
+    Category: "${category}"
+    Generate ${count} specific, distinct, and creative variations for this shot. 
+    For "Camera Angles", suggest specific angles (e.g. Over the shoulder, wide shot).
+    For "Narrative", suggest plot progressions.
+    For "Environment", suggest different settings or weather.
+    For "Artistic Style", suggest visual styles.
+    
+    Make the suggestions intelligent based on the context (e.g. if context has a horse, suggest 'Horse's POV').`;
+
+    try {
+        const result = await generateText(userPrompt, systemPrompt, settings);
+        const cleanJson = result.replace(/```json|```/g, '').trim();
+        const parsed = JSON.parse(cleanJson);
+        if (Array.isArray(parsed)) return parsed.slice(0, count);
+        return [];
+    } catch (e) {
+        console.error("Failed to get suggestions:", e);
+        return Array(count).fill(`Variation of ${category}`);
+    }
+};
+
+export const enhancePrompt = async (
+    config: GenerationConfig, 
+    settings: AppSettings
+): Promise<string> => {
+    const systemInstruction = `You are an expert prompt engineer for advanced AI image generation models (specifically Gemini 3 Pro).
+    Your task is to rewrite the user's input to be highly descriptive, vivid, and cinematic.
+    
+    Incorporate the following details naturally into the description if they are provided, but do not just list them:
+    - Style: ${config.style}
+    - Shot Type: ${config.shotType}
+    - Camera Angle: ${config.cameraAngle}
+    - Lighting: ${config.lighting}
+
+    The goal is to produce a prompt that generates a high-quality, professional image suitable for a storyboard.
+    Output ONLY the enhanced prompt text. Do not add explanations or quotes.`;
+
+    const userPrompt = `Original Prompt: ${config.prompt}`;
+
+    try {
+        return await generateText(userPrompt, systemInstruction, settings);
+    } catch (e) {
+        console.error("Failed to enhance prompt:", e);
+        return config.prompt; // Fallback to original
+    }
+};
+
+
+// --- IMAGE GENERATION ---
 
 // --- Google Provider Implementation ---
 const generateWithGoogle = async (config: GenerationConfig, modelOverride?: string, apiKey?: string) => {
@@ -62,11 +204,11 @@ const generateWithGoogle = async (config: GenerationConfig, modelOverride?: stri
 
 // --- External Provider Helper (Supports Text-to-Image and Image-to-Image) ---
 const generateWithExternal = async (
-  config: GenerationConfig | { prompt: string }, // Can be full config or simple object
+  config: GenerationConfig | { prompt: string }, 
   apiKey: string, 
   baseUrl: string, 
   model: string,
-  inputImage?: string // Optional base64/url for variations
+  inputImage?: string 
 ) => {
   if (!apiKey) throw new Error("API Key is missing. Please add it in Settings.");
 
@@ -74,54 +216,41 @@ const generateWithExternal = async (
     ? constructDetailedPrompt(config as GenerationConfig) 
     : config.prompt;
 
-  const cleanUrl = baseUrl.replace(/\/$/, "");
+  const cleanUrl = baseUrl.trim().replace(/\/+$/, "");
   
-  // Detect if we should use Chat Completions (e.g. OpenRouter) or Image Generation
-  const isChatEndpoint = cleanUrl.includes('chat/completions');
+  // Detect if we should use Chat Completions
+  const isChatEndpoint = cleanUrl.includes('chat/completions') || cleanUrl.includes('openrouter.ai');
 
   let body: any;
+  let fetchUrl = cleanUrl;
   
   if (isChatEndpoint) {
-    // Construct Chat Completion Payload for providers like OpenRouter/Gemini
-    
+    if (!fetchUrl.includes('/chat/completions')) {
+        fetchUrl = `${fetchUrl}/chat/completions`;
+    }
+
     let messagesContent: any = fullPrompt;
 
-    // Handle Multimodal Input (Image + Text) for Variations
     if (inputImage) {
         messagesContent = [
-            {
-                type: "text",
-                text: fullPrompt
-            },
-            {
-                type: "image_url",
-                image_url: {
-                    url: inputImage // Works with data:image... or http://...
-                }
-            }
+            { type: "text", text: fullPrompt },
+            { type: "image_url", image_url: { url: inputImage } }
         ];
     }
 
     body = {
       model: model,
       messages: [
-        {
-          role: "user",
-          content: messagesContent
-        }
+        { role: "user", content: messagesContent }
       ],
     };
 
-    // OpenRouter/Gemini specific requirement: Modalities
-    // See: https://openrouter.ai/google/gemini-3-pro-image-preview/api
-    if (cleanUrl.includes('openrouter') || model.includes('gemini')) {
+    if (fetchUrl.includes('openrouter') || model.includes('gemini')) {
        body.modalities = ['image', 'text'];
     }
 
   } else {
-    // Construct Standard OpenAI Image Payload (DALL-E 3 does not support image input via this endpoint typically)
-    // If inputImage is present, this might fail unless endpoint supports edits/variations standard
-    
+    // Standard OpenAI Image Payload
     if (inputImage) {
          throw new Error("Standard OpenAI Image Generation endpoint does not support image-to-image variations via this method. Use a Chat Completion endpoint (OpenRouter) or Gemini.");
     }
@@ -150,15 +279,14 @@ const generateWithExternal = async (
       'Authorization': `Bearer ${apiKey}`
   };
 
-  // OpenRouter specific headers for better tracking (optional)
-  if (cleanUrl.includes('openrouter')) {
+  if (fetchUrl.includes('openrouter')) {
       headers['HTTP-Referer'] = window.location.origin;
       headers['X-Title'] = 'Nano Banana Storyboarder';
   }
 
   let response;
   try {
-      response = await fetch(cleanUrl, {
+      response = await fetch(fetchUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(body)
@@ -167,7 +295,6 @@ const generateWithExternal = async (
       throw new Error(`Network Request Failed: ${networkError instanceof Error ? networkError.message : String(networkError)}. Check your internet or CORS settings.`);
   }
 
-  // Read body strictly once as text to allow flexible parsing
   const responseText = await response.text();
   
   if (!response.ok) {
@@ -186,7 +313,6 @@ const generateWithExternal = async (
     throw new Error(errorMessage);
   }
 
-  // Parse success response
   let data;
   try {
       data = JSON.parse(responseText);
@@ -194,34 +320,25 @@ const generateWithExternal = async (
       throw new Error(`Failed to parse valid JSON from API response. Raw: ${responseText.slice(0, 50)}...`);
   }
 
-  // --- Handle Chat Completion Response (OpenRouter / Markdown Image / URL) ---
   if (isChatEndpoint) {
      const message = data.choices?.[0]?.message;
      if (!message) throw new Error("No content found in chat completion response.");
      
-     // 1. Check for OpenRouter specific 'images' array in message
-     // Structure: message: { role: 'assistant', content: '', images: [ { image_url: { url: '...' } } ] }
      if (message.images && Array.isArray(message.images) && message.images.length > 0) {
         const imgObj = message.images[0];
-        // Handle both standard openai format inside images array or direct url property
         const url = imgObj.image_url?.url || imgObj.url;
         if (url) return url;
      }
 
      const content = message.content || "";
-
-     // 2. Check for Markdown image: ![alt](url)
      const mdMatch = content.match(/!\[.*?\]\((.*?)\)/);
      if (mdMatch && mdMatch[1]) return mdMatch[1];
 
-     // 3. Check for raw URL (simple heuristic)
      const urlMatch = content.match(/https?:\/\/[^\s)]+/);
      if (urlMatch) return urlMatch[0];
 
      throw new Error("Could not extract image URL from chat response. No 'images' array and no URL in content.");
   } 
-  
-  // --- Handle Standard Image Response ---
   else {
       const b64 = data.data?.[0]?.b64_json;
       if (b64) return `data:image/png;base64,${b64}`;
@@ -242,34 +359,29 @@ export const generateImageFromConfig = async (
 ): Promise<string> => {
   const provider = settings?.provider || Provider.GOOGLE;
 
-  try {
-    switch (provider) {
-      case Provider.OPENAI:
-        return await generateWithExternal(
+  // STRICT ROUTING: Ensure we only go to Google if it IS Google
+  if (provider === Provider.OPENAI) {
+      return await generateWithExternal(
           config, 
           settings?.apiKey || '', 
-          settings?.baseUrl || 'https://api.openai.com/v1/images/generations', 
-          settings?.modelOverride || 'dall-e-3',
+          'https://api.openai.com/v1/images/generations', 
+          settings?.imageModel || 'dall-e-3',
           undefined
-        );
-      
-      case Provider.CUSTOM:
-        return await generateWithExternal(
-          config, 
-          settings?.apiKey || '', 
-          settings?.baseUrl || 'https://openrouter.ai/api/v1/chat/completions', 
-          settings?.modelOverride || 'google/gemini-3-pro-image-preview',
-          undefined
-        );
-
-      case Provider.GOOGLE:
-      default:
-        return await generateWithGoogle(config, undefined, settings?.apiKey);
-    }
-  } catch (error) {
-    console.error("Error generating image:", error);
-    throw error;
+      );
   }
+
+  if (provider === Provider.CUSTOM) {
+      return await generateWithExternal(
+          config, 
+          settings?.apiKey || '', 
+          'https://openrouter.ai/api/v1', 
+          settings?.imageModel || 'google/gemini-3-pro-image-preview',
+          undefined
+      );
+  }
+
+  // Fallback to Google only if provider is Google
+  return await generateWithGoogle(config, undefined, settings?.apiKey);
 };
 
 /**
@@ -287,8 +399,8 @@ export const generateImageVariation = async (
   // 1. Route to External Provider (OpenAI / OpenRouter) if selected
   if (provider === Provider.OPENAI || provider === Provider.CUSTOM) {
      const apiKey = settings?.apiKey || '';
-     const baseUrl = settings?.baseUrl || (provider === Provider.OPENAI ? 'https://api.openai.com/v1/images/generations' : 'https://openrouter.ai/api/v1/chat/completions');
-     const modelId = settings?.modelOverride || (provider === Provider.OPENAI ? 'dall-e-3' : 'google/gemini-3-pro-image-preview');
+     const baseUrl = provider === Provider.OPENAI ? 'https://api.openai.com/v1/images/generations' : 'https://openrouter.ai/api/v1';
+     const modelId = settings?.imageModel || (provider === Provider.OPENAI ? 'dall-e-3' : 'google/gemini-3-pro-image-preview');
 
      return await generateWithExternal(
          { prompt: `Generate a variation of this image. ${prompt}` },
@@ -300,12 +412,12 @@ export const generateImageVariation = async (
   }
 
   // 2. Google Provider (Nano Banana) Implementation
+  // Note: Only runs if provider IS Google.
   const ai = getAiClient(settings?.apiKey);
 
   let mimeType = 'image/png';
   let data = '';
 
-  // Handle Base64 vs URL input
   if (inputImage.startsWith('data:')) {
       const matches = inputImage.match(/^data:(.+);base64,(.+)$/);
       if (matches) {
@@ -313,14 +425,12 @@ export const generateImageVariation = async (
           data = matches[2];
       }
   } else if (inputImage.startsWith('http')) {
-      // It's a URL (from OpenRouter/External). We must fetch it to get bytes for Gemini.
       try {
           const resp = await fetch(inputImage);
           const blob = await resp.blob();
           mimeType = blob.type;
           
           const buffer = await blob.arrayBuffer();
-          // Convert buffer to base64
           let binary = '';
           const bytes = new Uint8Array(buffer);
           const len = bytes.byteLength;
@@ -332,7 +442,6 @@ export const generateImageVariation = async (
           throw new Error("Could not fetch remote image for variation (CORS or Network error): " + e);
       }
   } else {
-      // Assume raw base64 or invalid
       data = inputImage.replace(/^data:image\/\w+;base64,/, "");
   }
 
