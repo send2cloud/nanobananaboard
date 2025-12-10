@@ -1,19 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { Handle, Position, NodeProps, NodeResizer } from 'reactflow';
-import { Wand2, Loader2, Settings2, ChevronDown, ChevronUp, Box, Server, Upload, RefreshCw } from 'lucide-react';
-import { SourceNodeData, MODEL_OPTIONS, ASPECT_RATIOS, STYLES, SHOT_TYPES, CAMERA_ANGLES, LIGHTING_OPTS, GenerationConfig, Provider } from '../../types';
+import { Wand2, Loader2, Settings2, ChevronDown, ChevronUp, Box, Upload, RefreshCw } from 'lucide-react';
+import { SourceNodeData, MODEL_OPTIONS, ASPECT_RATIOS, STYLES, GenerationConfig, Provider } from '../../types';
 import { NodeWrapper } from '../ui/NodeWrapper';
 
-export const SourceNode: React.FC<NodeProps<SourceNodeData>> = ({ data, selected }) => {
+export const SourceNode: React.FC<NodeProps<SourceNodeData>> = ({ id, data, selected }) => {
   const [prompt, setPrompt] = useState('');
   
   // Configuration State
   const [model, setModel] = useState(MODEL_OPTIONS.FLASH);
   const [aspectRatio, setAspectRatio] = useState(ASPECT_RATIOS.find(r => r.value === '16:9')?.value || '16:9');
   const [style, setStyle] = useState(STYLES[0].value);
-  const [shotType, setShotType] = useState<string>('');
-  const [cameraAngle, setCameraAngle] = useState<string>('');
-  const [lighting, setLighting] = useState<string>('');
 
   const [showConfig, setShowConfig] = useState(true);
   const [isEnhancing, setIsEnhancing] = useState(false);
@@ -28,9 +25,6 @@ export const SourceNode: React.FC<NodeProps<SourceNodeData>> = ({ data, selected
       model: isGoogle ? model : (data.globalModel || 'External'),
       aspectRatio,
       style,
-      shotType,
-      cameraAngle,
-      lighting,
       prompt: prompt || "Variation of input image",
     };
     
@@ -45,9 +39,6 @@ export const SourceNode: React.FC<NodeProps<SourceNodeData>> = ({ data, selected
             model: isGoogle ? model : (data.globalModel || 'External'),
             aspectRatio,
             style,
-            shotType,
-            cameraAngle,
-            lighting,
             prompt
         };
         const enhanced = await data.onEnhancePrompt(config);
@@ -64,17 +55,19 @@ export const SourceNode: React.FC<NodeProps<SourceNodeData>> = ({ data, selected
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-         // We generate immediately or just set the input?
-         // For SourceNode, usually we just set the input, but here we just trigger generation for now
-         // Ideally SourceNode should update its own state. 
-         // Since we don't have local state persistence for image yet, we trigger gen.
-         const config: GenerationConfig = {
-            model: isGoogle ? model : (data.globalModel || 'External'),
-            aspectRatio, 
-            style: 'Varied',
-            prompt: 'Refined Upload',
-         };
-         data.onGenerate(config, reader.result as string);
+         // Only set the image, do not auto-generate
+         if (data.onSetInputImage) {
+             data.onSetInputImage(id, reader.result as string);
+         } else {
+             // Fallback to auto-gen if handler is missing (legacy)
+             const config: GenerationConfig = {
+                model: isGoogle ? model : (data.globalModel || 'External'),
+                aspectRatio, 
+                style: 'Varied',
+                prompt: 'Refined Upload',
+             };
+             data.onGenerate(config, reader.result as string);
+         }
       };
       reader.readAsDataURL(file);
     }
@@ -89,8 +82,11 @@ export const SourceNode: React.FC<NodeProps<SourceNodeData>> = ({ data, selected
           {data.inputImage ? (
               <>
                 <img src={data.inputImage} alt="Source" className="w-full h-40 object-contain" />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="text-xs text-white font-medium">Reference Image</span>
+                <div 
+                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
+                >
+                    <span className="text-xs text-white font-medium flex items-center gap-2"><Upload className="w-3 h-3"/> Change Image</span>
                 </div>
               </>
           ) : (

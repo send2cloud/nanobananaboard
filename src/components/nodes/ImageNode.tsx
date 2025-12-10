@@ -179,15 +179,15 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
     </div>
 
     {lightboxOpen && data.imageUrl && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-md flex items-center justify-center animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-md flex items-center justify-center animate-in fade-in duration-200" onClick={() => setLightboxOpen(false)}>
            <button 
-             onClick={() => setLightboxOpen(false)} 
+             onClick={(e) => { e.stopPropagation(); setLightboxOpen(false); }} 
              className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-50"
            >
               <X className="w-6 h-6" />
            </button>
 
-           <div className="w-full h-full p-8 flex flex-col items-center justify-center relative">
+           <div className="w-full h-full p-8 flex flex-col items-center justify-center relative" onClick={(e) => e.stopPropagation()}>
               <div className="flex-1 w-full h-full flex items-center justify-center overflow-hidden">
                  <img 
                     src={data.imageUrl} 

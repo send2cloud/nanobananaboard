@@ -22,6 +22,7 @@ export interface AppSettings {
   baseUrl?: string; 
   imageModel?: string; // Replaces modelOverride
   textModel?: string; // New for suggestions
+  enableGoogle?: boolean; // Toggle for Google Models
 }
 
 export interface GenerationConfig {
@@ -48,13 +49,14 @@ export interface ImageNodeData {
   loading?: boolean;
   onAddVariation?: (id: string) => void;
   onEdit?: (id: string, prompt: string) => void;
-  onAddToClipboard?: (url: string, prompt: string, nodeId: string) => void; // New
+  onAddToClipboard?: (url: string, prompt: string, nodeId: string) => void; 
   generatedBy?: string; 
 }
 
 export interface SourceNodeData {
   inputImage?: string;
   onGenerate: (config: GenerationConfig, image?: string) => void;
+  onSetInputImage?: (id: string, image: string) => void; // New callback for setting image
   onEnhancePrompt?: (config: GenerationConfig) => Promise<string>;
   loading?: boolean;
   activeProvider?: string;
@@ -73,11 +75,11 @@ export interface VariationNodeData {
 
 export interface StartNodeData {
   onGenerate: (config: GenerationConfig, image?: string) => void;
-  onEnhancePrompt?: (config: GenerationConfig) => Promise<string>; // New Magic Wand callback
+  onEnhancePrompt?: (config: GenerationConfig) => Promise<string>; 
   loading?: boolean;
-  activeProvider?: string; // Visual feedback
-  provider?: Provider; // Explicit provider enum
-  globalModel?: string; // Explicit global model ID
+  activeProvider?: string; 
+  provider?: Provider; 
+  globalModel?: string; 
 }
 
 export interface GridNodeData {
@@ -102,7 +104,7 @@ export interface GroupNodeData {
 
 export interface VariationConfig {
   category: string;
-  prompts: string[]; // Changed from single prompt to specific prompts
+  prompts: string[]; 
   model: string;
 }
 

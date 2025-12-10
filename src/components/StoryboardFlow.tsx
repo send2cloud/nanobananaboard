@@ -13,7 +13,6 @@ import ReactFlow, {
   useReactFlow,
   Panel,
 } from 'reactflow';
-// Imports from atomic node components
 import { StartNode } from './nodes/StartNode';
 import { ImageNode } from './nodes/ImageNode';
 import { VariationNode } from './nodes/VariationNode';
@@ -37,13 +36,12 @@ import {
   ClipboardItem
 } from '../types';
 import { generateImageFromConfig, generateImageVariation, getVariationSuggestions, enhancePrompt, editGeneratedImage } from '../services/geminiService';
-import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, Download, Upload, HardDrive, PlusSquare } from 'lucide-react';
+import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, Download, Upload, HardDrive, PlusSquare, ToggleLeft, ToggleRight } from 'lucide-react';
 import { useAppSettings } from '../hooks/useAppSettings';
 import { useGraphLayout } from '../hooks/useGraphLayout';
 import { useProjectPersistence } from '../hooks/useProjectPersistence';
 
 const NODE_WIDTH = 400;
-const STORAGE_KEY = 'nano_banana_settings_v2'; 
 
 const initialNodes: Node[] = [
   {
@@ -59,23 +57,17 @@ const FlowEditor = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const { fitView, getNodes, project } = useReactFlow();
 
-  // --- Global App Settings ---
   const [showSettings, setShowSettings] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
-
-  // --- Clipboard State ---
   const [clipboardItems, setClipboardItems] = useState<ClipboardItem[]>([]);
 
-  // Custom Hooks
   const { appSettings, setAppSettings, isSaving } = useAppSettings();
   const { findPositionForNewNode } = useGraphLayout();
   
-  // Use notification wrapper for hooks
   const notify = useCallback((msg: string) => setNotification(msg), []);
   const { saveToStorage, loadFromStorage, exportToJson, importFromJson } = useProjectPersistence(setNodes, setEdges, notify);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Clear notification after 3 seconds
   useEffect(() => {
     if (notification) {
         const timer = setTimeout(() => setNotification(null), 3000);
@@ -83,7 +75,6 @@ const FlowEditor = () => {
     }
   }, [notification]);
 
-  // Use refs for callbacks
   const handleAddVariationRef = useRef<(id: string) => void>(() => {});
   const handleBranchRef = useRef<(imageUrl: string, prompt: string, parentId: string) => void>(() => {});
   const handleUngroupRef = useRef<(id: string) => void>(() => {});
@@ -93,12 +84,12 @@ const FlowEditor = () => {
   const handleEditImageRef = useRef<(id: string, prompt: string) => void>(() => {});
   const handleAddToClipboardRef = useRef<(url: string, prompt: string, nodeId: string) => void>(() => {});
   const handleSourceGenerateRef = useRef<(nodeId: string, config: GenerationConfig, image?: string) => void>(() => {});
+  const handleSetInputImageRef = useRef<(nodeId: string, image: string) => void>(() => {});
   const appSettingsRef = useRef<AppSettings>(appSettings);
 
   useEffect(() => {
     appSettingsRef.current = appSettings;
     
-    // Update visualization of Start nodes if provider changes
     setNodes(nds => nds.map(n => {
         if (n.type === NodeType.START || n.type === NodeType.SOURCE) {
             let providerName = 'Nano Banana';
@@ -130,7 +121,7 @@ const FlowEditor = () => {
     [NodeType.SOURCE]: SourceNode,
   }), []);
 
-  // --- LOGIC HANDLERS (Defined first to avoid hoisting issues) ---
+  // --- HANDLERS ---
 
   const handleSuggestVariations = useCallback(async (category: string, count: number, context: string) => {
       return await getVariationSuggestions(context, category, count, appSettingsRef.current);
@@ -147,6 +138,15 @@ const FlowEditor = () => {
       ]);
       notify("Added to Clipboard");
   }, [notify]);
+
+  const handleSetInputImage = useCallback((nodeId: string, image: string) => {
+     setNodes(nds => nds.map(n => {
+         if (n.id === nodeId) {
+             return { ...n, data: { ...n.data, inputImage: image } };
+         }
+         return n;
+     }));
+  }, [setNodes]);
 
   const handleBranch = useCallback((imageUrl: string, prompt: string, parentId: string) => {
     const currentNodes = getNodes();
@@ -496,8 +496,6 @@ const FlowEditor = () => {
     }
   }, [setNodes, setEdges, findPositionForNewNode, fitView, handleAddVariation, handleEditImage, handleAddToClipboard, getNodes]);
 
-  // --- CONNECTION & INTERACTION HANDLERS (Defined last) ---
-
   const onConnect = useCallback((params: Connection) => {
       setEdges((eds) => addEdge({ 
         ...params, 
@@ -505,7 +503,6 @@ const FlowEditor = () => {
         style: { stroke: '#52525b', strokeWidth: 2 } 
       }, eds));
 
-      // Check if connecting Image -> SourceNode
       const targetNode = getNodes().find(n => n.id === params.target);
       const sourceNode = getNodes().find(n => n.id === params.source);
 
@@ -560,14 +557,15 @@ const FlowEditor = () => {
                  position,
                  data: {
                      inputImage: item.imageUrl,
-                     onGenerate: (config, img) => handleSourceGenerateRef.current(newNode.id, config, img), // Now this is safe via ref
-                     onEnhancePrompt: handleEnhancePrompt, // Now defined
+                     onGenerate: (config, img) => handleSourceGenerateRef.current(newNode.id, config, img), 
+                     onSetInputImage: (id, img) => handleSetInputImageRef.current(id, img),
+                     onEnhancePrompt: handleEnhancePrompt, 
                      loading: false
                  }
              };
              
-             // Ensure callback has access to ID
              newNode.data.onGenerate = (config, img) => handleSourceGenerateRef.current(newNode.id, config, img);
+             newNode.data.onSetInputImage = (id, img) => handleSetInputImageRef.current(id, img);
 
              setNodes(nds => [...nds, newNode]);
              notify("Created Source Node from Clipboard");
@@ -575,7 +573,6 @@ const FlowEditor = () => {
       }
   }, [project, setNodes, notify, handleEnhancePrompt]);
 
-  // --- Add Source Node Manually ---
   const handleAddSourceNode = useCallback(() => {
       const newNode: Node<SourceNodeData> = {
           id: `source-${Date.now()}`,
@@ -583,18 +580,20 @@ const FlowEditor = () => {
           position: { x: 100, y: 100 },
           data: {
               onGenerate: (config, img) => handleSourceGenerateRef.current(newNode.id, config, img),
-              onEnhancePrompt: handleEnhancePrompt, // Now defined
+              onSetInputImage: (id, img) => handleSetInputImageRef.current(id, img),
+              onEnhancePrompt: handleEnhancePrompt, 
               loading: false
           }
       };
+      // Explicitly bind for safety
       newNode.data.onGenerate = (config, img) => handleSourceGenerateRef.current(newNode.id, config, img);
+      newNode.data.onSetInputImage = (id, img) => handleSetInputImageRef.current(id, img);
 
       setNodes(nds => [...nds, newNode]);
       notify("Added new Refiner Node");
   }, [setNodes, notify, handleEnhancePrompt]);
 
 
-  // --- Grouping & Layout Handlers ---
   const handleCreateGroup = useCallback(() => {
     const selectedNodes = getNodes().filter(n => n.selected && n.type !== NodeType.GROUP && !n.parentNode);
     if (selectedNodes.length < 2) {
@@ -679,8 +678,6 @@ const FlowEditor = () => {
       } : n.parentNode === groupId ? { ...n, hidden: collapsed } : n));
   }, [setNodes]);
 
-  // --- Effects to Update Refs ---
-
   useEffect(() => {
     handleAddVariationRef.current = handleAddVariation;
     handleBranchRef.current = handleBranch;
@@ -691,37 +688,45 @@ const FlowEditor = () => {
     handleEditImageRef.current = handleEditImage;
     handleAddToClipboardRef.current = handleAddToClipboard;
     handleSourceGenerateRef.current = handleSourceGenerate;
-  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, handleEditImage, handleAddToClipboard, handleSourceGenerate]);
-
-  // --- Effect to Update Node Callbacks ---
+    handleSetInputImageRef.current = handleSetInputImage;
+  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, handleEditImage, handleAddToClipboard, handleSourceGenerate, handleSetInputImage]);
 
   useEffect(() => {
     setNodes((nds) => nds.map(n => {
         const common = { ...n };
-        if (n.type === NodeType.START) {
-             return { ...common, data: { ...common.data, onGenerate: handleInitialGenerate, onEnhancePrompt: handleEnhancePrompt } };
-        }
+        const data = { ...common.data };
+        
+        // Always attach base handlers
+        data.onGenerate = n.type === NodeType.SOURCE 
+            ? (cfg: GenerationConfig, img?: string) => handleSourceGenerate(n.id, cfg, img)
+            : n.type === NodeType.START 
+                ? handleInitialGenerate 
+                : n.type === NodeType.VARIATION 
+                    ? handleRunVariation 
+                    : undefined;
+
+        if (n.type === NodeType.START || n.type === NodeType.SOURCE) data.onEnhancePrompt = handleEnhancePrompt;
         if (n.type === NodeType.IMAGE) {
-             return { ...common, data: { ...common.data, onAddVariation: handleAddVariation, onEdit: handleEditImage, onAddToClipboard: handleAddToClipboard } };
+            data.onAddVariation = handleAddVariation;
+            data.onEdit = handleEditImage;
+            data.onAddToClipboard = handleAddToClipboard;
         }
-        if (n.type === NodeType.VARIATION) {
-             return { ...common, data: { ...common.data, onGenerate: handleRunVariation, onSuggest: handleSuggestVariations } };
-        }
-        if (n.type === NodeType.GRID) {
-             return { ...common, data: { ...common.data, onBranch: handleBranch } };
-        }
+        if (n.type === NodeType.VARIATION) data.onSuggest = handleSuggestVariations;
+        if (n.type === NodeType.GRID) data.onBranch = handleBranch;
         if (n.type === NodeType.GROUP) {
-             return { ...common, data: { ...common.data, onUngroup: handleUngroup, onToggleCollapse: handleToggleCollapse } };
+            data.onUngroup = handleUngroup;
+            data.onToggleCollapse = handleToggleCollapse;
         }
         if (n.type === NodeType.SOURCE) {
-             return { ...common, data: { ...common.data, onGenerate: (cfg: GenerationConfig, img?: string) => handleSourceGenerate(n.id, cfg, img), onEnhancePrompt: handleEnhancePrompt } };
+            data.onSetInputImage = (id: string, img: string) => handleSetInputImage(id, img);
         }
-        return n;
+
+        return { ...common, data };
     }));
   }, [
       handleInitialGenerate, handleAddVariation, handleRunVariation, 
       handleBranch, handleUngroup, handleToggleCollapse, 
-      handleSuggestVariations, handleEnhancePrompt, handleEditImage, handleAddToClipboard, handleSourceGenerate,
+      handleSuggestVariations, handleEnhancePrompt, handleEditImage, handleAddToClipboard, handleSourceGenerate, handleSetInputImage,
       setNodes
   ]);
 
@@ -745,6 +750,12 @@ const FlowEditor = () => {
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  const visibleProviders = useMemo(() => {
+      const providers = [Provider.CUSTOM]; // Custom is always there
+      if (appSettings.enableGoogle) providers.push(Provider.GOOGLE);
+      return providers;
+  }, [appSettings.enableGoogle]);
 
   return (
     <div className="w-full h-screen bg-background relative" onDragOver={onDragOver} onDrop={onDrop}>
@@ -773,9 +784,7 @@ const FlowEditor = () => {
              <PlusSquare className="w-4 h-4" />
              Refiner +
            </button>
-
            <div className="h-8 w-px bg-zinc-700 mx-1"></div>
-
            <button 
              onClick={handleCreateGroup}
              className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"
@@ -784,62 +793,17 @@ const FlowEditor = () => {
              <Layers className="w-4 h-4" />
              Group
            </button>
-
            <div className="h-8 w-px bg-zinc-700 mx-1"></div>
-
-           <button 
-             onClick={saveToStorage}
-             className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"
-             title="Save to Browser Storage"
-           >
-             <Save className="w-4 h-4" />
-           </button>
-           
-           <button 
-             onClick={handleLoadProject}
-             className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"
-             title="Load from Browser Storage"
-           >
-             <HardDrive className="w-4 h-4" />
-           </button>
-
-           <button 
-             onClick={exportToJson}
-             className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"
-             title="Download Project JSON"
-           >
-             <Download className="w-4 h-4" />
-           </button>
-
-           <button 
-             onClick={() => fileInputRef.current?.click()}
-             className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"
-             title="Import Project JSON"
-           >
-             <Upload className="w-4 h-4" />
-           </button>
-           
-           <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              accept=".json" 
-              onChange={handleImportFile}
-           />
-
+           <button onClick={saveToStorage} className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"><Save className="w-4 h-4" /></button>
+           <button onClick={handleLoadProject} className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"><HardDrive className="w-4 h-4" /></button>
+           <button onClick={exportToJson} className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"><Download className="w-4 h-4" /></button>
+           <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"><Upload className="w-4 h-4" /></button>
+           <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImportFile} />
            <div className="h-8 w-px bg-zinc-700 mx-1"></div>
-
-           <button 
-             onClick={() => setShowSettings(true)}
-             className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"
-           >
-             <Settings className="w-4 h-4" />
-             Settings
-           </button>
+           <button onClick={() => setShowSettings(true)} className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"><Settings className="w-4 h-4" /> Settings</button>
         </Panel>
       </ReactFlow>
 
-      {/* Clipboard Component */}
       <Clipboard items={clipboardItems} onRemove={handleRemoveFromClipboard} onDragStart={onDragStart} />
       
       <div className="absolute top-6 left-6 pointer-events-none">
@@ -866,29 +830,27 @@ const FlowEditor = () => {
                 <h3 className="font-bold text-white flex items-center gap-2">
                    <Settings className="w-5 h-5" /> Global Settings
                 </h3>
-                <button onClick={() => setShowSettings(false)} className="text-zinc-400 hover:text-white">
-                   <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-4">
+                    <span className="text-xs font-mono text-zinc-500">v1.2.0</span>
+                    <button onClick={() => setShowSettings(false)} className="text-zinc-400 hover:text-white">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
              </div>
              
              <div className="p-6 space-y-6">
                 <div>
                    <label className="block text-sm font-medium text-zinc-400 mb-2">Image Generation Provider</label>
-                   <div className="grid grid-cols-3 gap-2">
-                      {[Provider.GOOGLE, Provider.OPENAI, Provider.CUSTOM].map(p => (
+                   <div className="flex gap-2 mb-4">
+                       {visibleProviders.map(p => (
                          <button
                            key={p}
                            onClick={() => setAppSettings(prev => {
                                let newImgModel = prev.imageModel;
                                let newTxtModel = prev.textModel;
-
-                               if (p === Provider.OPENAI) {
-                                   newImgModel = 'dall-e-3'; 
-                                   newTxtModel = 'gpt-4o';
-                               }
                                if (p === Provider.CUSTOM) {
-                                   newImgModel = 'google/gemini-3-pro-image-preview';
-                                   newTxtModel = 'google/gemini-2.5-flash';
+                                   newImgModel = 'google/gemini-2.0-flash-001';
+                                   newTxtModel = 'google/gemini-2.0-flash-001';
                                }
                                const restoredKey = prev.keys[p] || '';
                                return { 
@@ -899,31 +861,45 @@ const FlowEditor = () => {
                                    textModel: newTxtModel 
                                 };
                            })}
-                           className={`py-2 px-3 rounded-lg text-xs font-bold uppercase transition-all border ${
+                           className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase transition-all border ${
                               appSettings.provider === p 
                                 ? 'bg-accent/20 border-accent text-accent' 
                                 : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-600'
                            }`}
                          >
-                           {p === Provider.GOOGLE ? 'Nano Banana' : p === Provider.CUSTOM ? 'OpenRouter' : p}
+                           {p === Provider.GOOGLE ? 'Nano Banana' : 'OpenRouter'}
                          </button>
                       ))}
+                   </div>
+                   
+                   {/* Enable Google Toggle */}
+                   <div className="flex items-center justify-between p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                        <div className="flex flex-col">
+                            <span className="text-sm font-medium text-zinc-300">Enable Google Models</span>
+                            <span className="text-[10px] text-zinc-500">Access Nano Banana & Pro direct</span>
+                        </div>
+                        <button 
+                            onClick={() => {
+                                const newVal = !appSettings.enableGoogle;
+                                setAppSettings(prev => ({
+                                    ...prev,
+                                    enableGoogle: newVal,
+                                    // If we are disabling Google AND it was active, switch to Custom
+                                    provider: (prev.provider === Provider.GOOGLE && !newVal) ? Provider.CUSTOM : prev.provider
+                                }));
+                            }}
+                            className={`p-1 rounded-full transition-colors ${appSettings.enableGoogle ? 'text-green-500' : 'text-zinc-600'}`}
+                        >
+                            {appSettings.enableGoogle ? <ToggleRight className="w-8 h-8" /> : <ToggleLeft className="w-8 h-8" />}
+                        </button>
                    </div>
                 </div>
 
                 <div className="space-y-4 animate-in slide-in-from-top-2">
-                    <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg flex gap-3 items-start">
-                        <AlertCircle className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
-                        <p className="text-xs text-zinc-400">
-                            Settings are saved per-provider automatically.
-                        </p>
-                    </div>
-                    
                     <div>
                         <div className="flex justify-between mb-2">
                             <label className="text-sm font-medium text-zinc-400">
                                 {appSettings.provider === Provider.GOOGLE ? 'Google AI Studio Key' : 
-                                 appSettings.provider === Provider.OPENAI ? 'OpenAI API Key' : 
                                  'OpenRouter API Key'}
                             </label>
                             <span className={`text-[10px] flex items-center gap-1 font-medium transition-colors ${isSaving ? 'text-zinc-500' : 'text-green-500'}`}>
@@ -955,7 +931,7 @@ const FlowEditor = () => {
                                     type="text" 
                                     value={appSettings.imageModel || ''}
                                     onChange={(e) => setAppSettings(prev => ({ ...prev, imageModel: e.target.value }))}
-                                    placeholder="google/gemini-3-pro-image-preview"
+                                    placeholder="google/gemini-2.0-flash-001"
                                     className="w-full bg-zinc-950 border border-border rounded-lg p-2.5 text-sm text-white focus:border-accent focus:ring-1 focus:ring-accent outline-none placeholder-zinc-700"
                                 />
                             </div>
@@ -965,7 +941,7 @@ const FlowEditor = () => {
                                     type="text" 
                                     value={appSettings.textModel || ''}
                                     onChange={(e) => setAppSettings(prev => ({ ...prev, textModel: e.target.value }))}
-                                    placeholder="google/gemini-2.5-flash"
+                                    placeholder="google/gemini-2.0-flash-001"
                                     className="w-full bg-zinc-950 border border-border rounded-lg p-2.5 text-sm text-white focus:border-accent focus:ring-1 focus:ring-accent outline-none placeholder-zinc-700"
                                 />
                             </div>
@@ -977,8 +953,8 @@ const FlowEditor = () => {
              <div className="p-4 bg-zinc-900/50 border-t border-border flex justify-end">
                 <button 
                   onClick={() => {
-                      localStorage.setItem(STORAGE_KEY, JSON.stringify(appSettings));
-                      setNotification("Settings Saved to Local Storage");
+                      localStorage.setItem('nano_banana_settings_v3', JSON.stringify(appSettings));
+                      setNotification("Settings Saved");
                       setShowSettings(false);
                   }}
                   className="px-6 py-2 bg-accent hover:bg-blue-600 text-white font-bold rounded-lg transition-colors text-sm flex items-center gap-2 shadow-lg shadow-blue-500/20"

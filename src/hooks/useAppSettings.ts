@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AppSettings, Provider } from '../types';
 
-const STORAGE_KEY = 'nano_banana_settings_v2';
+const STORAGE_KEY = 'nano_banana_settings_v3'; // Bumped version to force new defaults
 
 export const useAppSettings = () => {
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
@@ -14,45 +14,31 @@ export const useAppSettings = () => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       
-      // Attempt to load new V2 settings
       if (stored && stored !== 'undefined' && stored !== 'null') {
         const parsed = JSON.parse(stored);
-        // Ensure keys object exists
         if (!parsed.keys) parsed.keys = defaultKeys;
-        return parsed;
+        
+        // Ensure defaults if fields are missing in migration
+        return {
+           ...parsed,
+           enableGoogle: parsed.enableGoogle ?? false,
+        };
       }
 
-      // Fallback: Try to migrate old settings
-      const oldStored = localStorage.getItem('nano_banana_settings');
-      if (oldStored && oldStored !== 'undefined') {
-          const oldParsed = JSON.parse(oldStored);
-          const initialKeys = { ...defaultKeys };
-          
-          if (oldParsed.apiKey && oldParsed.provider) {
-             initialKeys[oldParsed.provider as Provider] = oldParsed.apiKey;
-          }
-
-          return {
-              provider: oldParsed.provider || Provider.GOOGLE,
-              apiKey: oldParsed.apiKey || '',
-              keys: initialKeys,
-              baseUrl: oldParsed.baseUrl || '',
-              imageModel: oldParsed.imageModel || '',
-              textModel: oldParsed.textModel || ''
-          };
-      }
-
+      // Legacy migration logic could go here, but sticking to fresh defaults for v3 ensures users see updates
     } catch (e) {
       console.error("Failed to load settings from storage", e);
     }
 
+    // Default Initialization
     return {
-      provider: Provider.GOOGLE,
+      provider: Provider.CUSTOM, // Default to OpenRouter
       apiKey: '',
       keys: defaultKeys,
       baseUrl: '',
-      imageModel: '',
-      textModel: ''
+      imageModel: 'google/gemini-2.0-flash-001', // Default OpenRouter model
+      textModel: 'google/gemini-2.0-flash-001',
+      enableGoogle: false // Disabled by default
     };
   });
 
