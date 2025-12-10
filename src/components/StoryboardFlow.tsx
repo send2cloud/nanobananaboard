@@ -12,7 +12,6 @@ import ReactFlow, {
   BackgroundVariant,
   useReactFlow,
   Panel,
-  useStoreApi,
 } from 'reactflow';
 // Imports from atomic node components
 import { StartNode } from './nodes/StartNode';
@@ -20,6 +19,9 @@ import { ImageNode } from './nodes/ImageNode';
 import { VariationNode } from './nodes/VariationNode';
 import { GridNode } from './nodes/GridNode';
 import { GroupNode } from './nodes/GroupNode';
+import { SourceNode } from './nodes/SourceNode';
+import { Clipboard } from './ui/Clipboard';
+
 import { 
   NodeType, 
   ImageNodeData, 
@@ -27,13 +29,15 @@ import {
   StartNodeData, 
   GridNodeData, 
   GroupNodeData,
+  SourceNodeData,
   VariationConfig, 
   GenerationConfig,
   AppSettings,
-  Provider
+  Provider,
+  ClipboardItem
 } from '../types';
 import { generateImageFromConfig, generateImageVariation, getVariationSuggestions, enhancePrompt, editGeneratedImage } from '../services/geminiService';
-import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, ChevronDown, ChevronUp, Download, Upload, HardDrive, FileJson } from 'lucide-react';
+import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, Download, Upload, HardDrive } from 'lucide-react';
 import { useAppSettings } from '../hooks/useAppSettings';
 import { useGraphLayout } from '../hooks/useGraphLayout';
 import { useProjectPersistence } from '../hooks/useProjectPersistence';
@@ -53,11 +57,14 @@ const initialNodes: Node[] = [
 const FlowEditor = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const { fitView, getNodes } = useReactFlow();
+  const { fitView, getNodes, project } = useReactFlow();
 
   // --- Global App Settings ---
   const [showSettings, setShowSettings] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+
+  // --- Clipboard State ---
+  const [clipboardItems, setClipboardItems] = useState<ClipboardItem[]>([]);
 
   // Custom Hooks
   const { appSettings, setAppSettings, isSaving } = useAppSettings();
@@ -76,7 +83,7 @@ const FlowEditor = () => {
     }
   }, [notification]);
 
-  // Use refs for callbacks to avoid stale closures in React Flow handlers
+  // Use refs for callbacks
   const handleAddVariationRef = useRef<(id: string) => void>(() => {});
   const handleBranchRef = useRef<(imageUrl: string, prompt: string, parentId: string) => void>(() => {});
   const handleUngroupRef = useRef<(id: string) => void>(() => {});
@@ -84,6 +91,8 @@ const FlowEditor = () => {
   const handleSuggestRef = useRef<(category: string, count: number, context: string) => Promise<string[]>>((c, n, ctx) => Promise.resolve([]));
   const handleEnhanceRef = useRef<(config: GenerationConfig) => Promise<string>>(() => Promise.resolve(""));
   const handleEditImageRef = useRef<(id: string, prompt: string) => void>(() => {});
+  const handleAddToClipboardRef = useRef<(url: string, prompt: string, nodeId: string) => void>(() => {});
+  const handleSourceGenerateRef = useRef<(nodeId: string, config: GenerationConfig, image?: string) => void>(() => {});
   const appSettingsRef = useRef<AppSettings>(appSettings);
 
   useEffect(() => {
@@ -91,12 +100,11 @@ const FlowEditor = () => {
     
     // Update visualization of Start nodes if provider changes
     setNodes(nds => nds.map(n => {
-        if (n.type === NodeType.START) {
+        if (n.type === NodeType.START || n.type === NodeType.SOURCE) {
             let providerName = 'Nano Banana';
             if (appSettings.provider === Provider.OPENAI) providerName = 'OpenAI';
             if (appSettings.provider === Provider.CUSTOM) providerName = 'OpenRouter';
             
-            // Only update if changed to avoid unnecessary re-renders
             if (n.data.activeProvider !== providerName || n.data.provider !== appSettings.provider) {
                  return { 
                     ...n, 
@@ -119,36 +127,115 @@ const FlowEditor = () => {
     [NodeType.VARIATION]: VariationNode,
     [NodeType.GRID]: GridNode,
     [NodeType.GROUP]: GroupNode,
+    [NodeType.SOURCE]: SourceNode,
   }), []);
 
-  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge({ 
-    ...params, 
-    animated: true, 
-    style: { stroke: '#52525b', strokeWidth: 2 } 
-  }, eds)), [setEdges]);
+  // --- Connection Logic ---
+  const onConnect = useCallback((params: Connection) => {
+      setEdges((eds) => addEdge({ 
+        ...params, 
+        animated: true, 
+        style: { stroke: '#52525b', strokeWidth: 2 } 
+      }, eds));
+
+      // Check if connecting Image -> SourceNode
+      const targetNode = getNodes().find(n => n.id === params.target);
+      const sourceNode = getNodes().find(n => n.id === params.source);
+
+      if (targetNode?.type === NodeType.SOURCE && (sourceNode?.type === NodeType.IMAGE || sourceNode?.type === NodeType.GRID)) {
+          let imageUrl = '';
+          if (sourceNode.type === NodeType.IMAGE) {
+              imageUrl = (sourceNode.data as ImageNodeData).imageUrl || '';
+          }
+          // Note: Logic for Grid connection is trickier as Grid has multiple images, usually handled via 'Branch' button
+          
+          if (imageUrl) {
+              setNodes(nds => nds.map(n => n.id === params.target ? {
+                  ...n,
+                  data: { ...n.data, inputImage: imageUrl }
+              } : n));
+              notify("Source Node updated with input image");
+          }
+      }
+
+  }, [setEdges, getNodes, setNodes, notify]);
 
 
-  // --- Grouping Logic ---
+  // --- Clipboard Logic ---
+  const handleAddToClipboard = useCallback((imageUrl: string, prompt: string, nodeId: string) => {
+      setClipboardItems(prev => [
+          ...prev, 
+          { id: `clip-${Date.now()}`, imageUrl, prompt, sourceNodeId: nodeId }
+      ]);
+      notify("Added to Clipboard");
+  }, [notify]);
 
+  const handleRemoveFromClipboard = useCallback((id: string) => {
+      setClipboardItems(prev => prev.filter(i => i.id !== id));
+  }, []);
+
+  const onDragStart = (e: React.DragEvent, item: ClipboardItem) => {
+      e.dataTransfer.setData('application/reactflow/clipboard', JSON.stringify(item));
+      e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const onDragOver = useCallback((event: React.DragEvent) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onDrop = useCallback((event: React.DragEvent) => {
+      event.preventDefault();
+      const dataStr = event.dataTransfer.getData('application/reactflow/clipboard');
+      
+      if (dataStr) {
+          const item: ClipboardItem = JSON.parse(dataStr);
+          const reactFlowBounds = document.querySelector('.react-flow')?.getBoundingClientRect();
+          
+          if (reactFlowBounds) {
+             const position = project({
+                 x: event.clientX - reactFlowBounds.left,
+                 y: event.clientY - reactFlowBounds.top
+             });
+
+             const newNode: Node<SourceNodeData> = {
+                 id: `source-${Date.now()}`,
+                 type: NodeType.SOURCE,
+                 position,
+                 data: {
+                     inputImage: item.imageUrl,
+                     onGenerate: (config, img) => handleSourceGenerateRef.current(newNode.id, config, img), // Fix: pass node ID logic
+                     onEnhancePrompt: handleEnhancePrompt,
+                     loading: false
+                 }
+             };
+             
+             // We need to update the node definition immediately so the callback has access to ID
+             newNode.data.onGenerate = (config, img) => handleSourceGenerateRef.current(newNode.id, config, img);
+
+             setNodes(nds => [...nds, newNode]);
+             notify("Created Source Node from Clipboard");
+          }
+      }
+  }, [project, setNodes, notify]);
+
+
+  // --- Grouping & Layout Handlers (Keep Existing) ---
   const handleCreateGroup = useCallback(() => {
     const selectedNodes = getNodes().filter(n => n.selected && n.type !== NodeType.GROUP && !n.parentNode);
-    
     if (selectedNodes.length < 2) {
       alert("Select at least 2 nodes to group (must not be already grouped).");
       return;
     }
-
     const padding = 40;
     const minX = Math.min(...selectedNodes.map(n => n.position.x));
     const minY = Math.min(...selectedNodes.map(n => n.position.y));
     const maxX = Math.max(...selectedNodes.map(n => n.position.x + (n.width || 400)));
     const maxY = Math.max(...selectedNodes.map(n => n.position.y + (n.height || 400)));
-
     const groupWidth = (maxX - minX) + padding * 2;
     const groupHeight = (maxY - minY) + padding * 2;
     const groupX = minX - padding;
     const groupY = minY - padding;
-
     const groupId = `group-${Date.now()}`;
     const groupNode: Node<GroupNodeData> = {
       id: groupId,
@@ -163,7 +250,6 @@ const FlowEditor = () => {
           onToggleCollapse: (id, c) => handleToggleCollapseRef.current(id, c)
       },
     };
-
     setNodes(nds => {
        const updatedNodes = nds.map(n => {
            if (selectedNodes.find(sn => sn.id === n.id)) {
@@ -181,18 +267,15 @@ const FlowEditor = () => {
        });
        return [...updatedNodes, groupNode];
     });
-
   }, [getNodes, setNodes]);
 
   const handleUngroup = useCallback((groupId: string) => {
       const allNodes = getNodes();
       const groupNode = allNodes.find(n => n.id === groupId);
       if (!groupNode) return;
-
       setNodes(nds => {
           return nds.reduce((acc, n) => {
               if (n.id === groupId) return acc;
-
               if (n.parentNode === groupId) {
                   return [...acc, {
                       ...n,
@@ -222,7 +305,8 @@ const FlowEditor = () => {
       } : n.parentNode === groupId ? { ...n, hidden: collapsed } : n));
   }, [setNodes]);
 
-  // --- Handlers ---
+
+  // --- Logic Handlers ---
 
   const handleSuggestVariations = useCallback(async (category: string, count: number, context: string) => {
       return await getVariationSuggestions(context, category, count, appSettingsRef.current);
@@ -249,6 +333,7 @@ const FlowEditor = () => {
             prompt,
             onAddVariation: (id) => handleAddVariationRef.current(id),
             onEdit: (id, p) => handleEditImageRef.current(id, p),
+            onAddToClipboard: (url, p, nid) => handleAddToClipboardRef.current(url, p, nid),
             generatedBy: 'Branch',
             loading: false
         }
@@ -262,9 +347,62 @@ const FlowEditor = () => {
         animated: true,
         style: { stroke: '#3b82f6', strokeWidth: 2 }
     }, eds));
-
     setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
   }, [setNodes, setEdges, findPositionForNewNode, fitView, getNodes]);
+
+  const handleSourceGenerate = useCallback(async (nodeId: string, config: GenerationConfig, image?: string) => {
+      setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: true } } : n));
+      
+      try {
+          const resultUrl = await generateImageFromConfig(config, appSettingsRef.current, image);
+          
+          const currentNodes = getNodes();
+          const sourceNode = currentNodes.find(n => n.id === nodeId);
+          if (!sourceNode) return;
+
+          const newPos = findPositionForNewNode(currentNodes, sourceNode);
+          const newImageNodeId = `img-src-${Date.now()}`;
+
+          let generatedBy = config.model;
+          if (appSettingsRef.current.provider !== Provider.GOOGLE) {
+             generatedBy = appSettingsRef.current.imageModel || 'External';
+          }
+
+          const newNode: Node<ImageNodeData> = {
+             id: newImageNodeId,
+             type: NodeType.IMAGE,
+             position: newPos,
+             data: {
+                 imageUrl: resultUrl,
+                 prompt: config.prompt,
+                 config,
+                 onAddVariation: handleAddVariationRef.current,
+                 onEdit: handleEditImageRef.current,
+                 onAddToClipboard: handleAddToClipboardRef.current,
+                 generatedBy,
+                 loading: false
+             }
+          };
+
+          setNodes(nds => {
+             const loaded = nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n);
+             return [...loaded, newNode];
+          });
+          setEdges(eds => addEdge({
+             id: `e-${nodeId}-${newImageNodeId}`,
+             source: nodeId,
+             target: newImageNodeId,
+             animated: true,
+             style: { stroke: '#a855f7', strokeWidth: 2 }
+          }, eds));
+          setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
+
+      } catch (e) {
+          console.error(e);
+          alert(`Refinement failed: ${e instanceof Error ? e.message : 'Unknown'}`);
+          setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n));
+      }
+  }, [setNodes, setEdges, getNodes, findPositionForNewNode, fitView]);
 
   const handleRunVariation = useCallback(async (nodeId: string, config: VariationConfig) => {
      setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: true } } : n));
@@ -274,9 +412,7 @@ const FlowEditor = () => {
      if(!variationNode) return;
 
      let modelToUse = config.model; 
-
      const currentProvider = appSettingsRef.current.provider;
-     
      const parentNode = currentNodes.find(n => n.id === variationNode.data.parentId);
      if (parentNode && parentNode.type === NodeType.IMAGE) {
          const parentModel = (parentNode.data as ImageNodeData).generatedBy;
@@ -336,8 +472,7 @@ const FlowEditor = () => {
 
      } catch (e) {
          console.error(e);
-         const msg = e instanceof Error ? e.message : 'Unknown Error';
-         alert(`Variation generation failed: ${msg}`);
+         alert(`Variation generation failed: ${e instanceof Error ? e.message : 'Unknown'}`);
          setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n));
      }
   }, [setNodes, setEdges, findPositionForNewNode, fitView, getNodes]);
@@ -385,6 +520,7 @@ const FlowEditor = () => {
                 prompt: `Edited: ${instructions}`,
                 onAddVariation: (id) => handleAddVariationRef.current(id),
                 onEdit: (id, p) => handleEditImageRef.current(id, p),
+                onAddToClipboard: (url, p, nid) => handleAddToClipboardRef.current(url, p, nid),
                 generatedBy: modelToUse,
                 loading: false
             }
@@ -402,7 +538,6 @@ const FlowEditor = () => {
             animated: true,
             style: { stroke: '#a855f7', strokeWidth: 2 } 
         }, eds));
-
         setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
 
     } catch (e) {
@@ -410,7 +545,6 @@ const FlowEditor = () => {
         alert(`Edit failed: ${e instanceof Error ? e.message : String(e)}`);
         setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n));
     }
-
   }, [setNodes, setEdges, findPositionForNewNode, fitView, getNodes]);
 
   const handleAddVariation = useCallback((parentId: string) => {
@@ -430,7 +564,6 @@ const FlowEditor = () => {
                parentY += p.position.y;
             }
         }
-
         const gapX = 100;
         const targetX = parentX + (parentNode.width || NODE_WIDTH) + gapX;
         const targetY = parentY; 
@@ -461,7 +594,6 @@ const FlowEditor = () => {
 
   const handleInitialGenerate = useCallback(async (config: GenerationConfig, uploadedImage?: string) => {
     const startNodeId = 'start-1';
-    
     setNodes((nds) => nds.map((node) => {
         if (node.id === startNodeId) {
             return { ...node, data: { ...node.data, loading: true } };
@@ -471,7 +603,6 @@ const FlowEditor = () => {
 
     try {
         let imageUrl: string;
-        
         if (uploadedImage) {
            imageUrl = uploadedImage;
         } else {
@@ -499,7 +630,8 @@ const FlowEditor = () => {
                 prompt: config.prompt,
                 config: config,
                 onAddVariation: handleAddVariation,
-                onEdit: handleEditImage, // Pass the handler
+                onEdit: handleEditImage, 
+                onAddToClipboard: handleAddToClipboard,
                 loading: false,
                 generatedBy: generatedBy
             }
@@ -517,7 +649,6 @@ const FlowEditor = () => {
             animated: true,
             style: { stroke: '#52525b', strokeWidth: 2 } 
         }, eds));
-        
         setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
 
     } catch (error) {
@@ -531,7 +662,7 @@ const FlowEditor = () => {
             return node;
         }));
     }
-  }, [setNodes, setEdges, findPositionForNewNode, fitView, handleAddVariation, handleEditImage, getNodes]);
+  }, [setNodes, setEdges, findPositionForNewNode, fitView, handleAddVariation, handleEditImage, handleAddToClipboard, getNodes]);
 
   useEffect(() => {
     handleAddVariationRef.current = handleAddVariation;
@@ -541,22 +672,18 @@ const FlowEditor = () => {
     handleSuggestRef.current = handleSuggestVariations;
     handleEnhanceRef.current = handleEnhancePrompt;
     handleEditImageRef.current = handleEditImage;
-  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, handleEditImage]);
+    handleAddToClipboardRef.current = handleAddToClipboard;
+    handleSourceGenerateRef.current = handleSourceGenerate;
+  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, handleEditImage, handleAddToClipboard, handleSourceGenerate]);
 
-  // --- RE-ATTACH CALLBACKS ON LOAD ---
-  // When loading from JSON/LocalStorage, the data object loses its functions.
-  // This effect ensures that all nodes have their event handlers attached.
   useEffect(() => {
     setNodes((nds) => nds.map(n => {
         const common = { ...n };
-        
-        // Skip update if callbacks are already present to avoid infinite loops,
-        // unless we forced a reload.
         if (n.type === NodeType.START) {
              return { ...common, data: { ...common.data, onGenerate: handleInitialGenerate, onEnhancePrompt: handleEnhancePrompt } };
         }
         if (n.type === NodeType.IMAGE) {
-             return { ...common, data: { ...common.data, onAddVariation: handleAddVariation, onEdit: handleEditImage } };
+             return { ...common, data: { ...common.data, onAddVariation: handleAddVariation, onEdit: handleEditImage, onAddToClipboard: handleAddToClipboard } };
         }
         if (n.type === NodeType.VARIATION) {
              return { ...common, data: { ...common.data, onGenerate: handleRunVariation, onSuggest: handleSuggestVariations } };
@@ -567,16 +694,17 @@ const FlowEditor = () => {
         if (n.type === NodeType.GROUP) {
              return { ...common, data: { ...common.data, onUngroup: handleUngroup, onToggleCollapse: handleToggleCollapse } };
         }
+        if (n.type === NodeType.SOURCE) {
+             return { ...common, data: { ...common.data, onGenerate: (cfg: GenerationConfig, img?: string) => handleSourceGenerate(n.id, cfg, img), onEnhancePrompt: handleEnhancePrompt } };
+        }
         return n;
     }));
   }, [
-      // Dependencies: If any handler identity changes, re-bind them to all nodes
       handleInitialGenerate, handleAddVariation, handleRunVariation, 
       handleBranch, handleUngroup, handleToggleCollapse, 
-      handleSuggestVariations, handleEnhancePrompt, handleEditImage, 
+      handleSuggestVariations, handleEnhancePrompt, handleEditImage, handleAddToClipboard, handleSourceGenerate,
       setNodes
   ]);
-
 
   const handleLoadProject = () => {
       const data = loadFromStorage();
@@ -596,13 +724,11 @@ const FlowEditor = () => {
               setTimeout(() => fitView({ padding: 0.2 }), 100);
           });
       }
-      // Reset input
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-
   return (
-    <div className="w-full h-screen bg-background relative">
+    <div className="w-full h-screen bg-background relative" onDragOver={onDragOver} onDrop={onDrop}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -682,6 +808,9 @@ const FlowEditor = () => {
            </button>
         </Panel>
       </ReactFlow>
+
+      {/* Clipboard Component */}
+      <Clipboard items={clipboardItems} onRemove={handleRemoveFromClipboard} onDragStart={onDragStart} />
       
       <div className="absolute top-6 left-6 pointer-events-none">
         <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
@@ -731,14 +860,11 @@ const FlowEditor = () => {
                                    newImgModel = 'google/gemini-3-pro-image-preview';
                                    newTxtModel = 'google/gemini-2.5-flash';
                                }
-                               
-                               // Load key for this provider from storage dictionary
                                const restoredKey = prev.keys[p] || '';
-
                                return { 
                                    ...prev, 
                                    provider: p,
-                                   apiKey: restoredKey, // Set active key
+                                   apiKey: restoredKey,
                                    imageModel: newImgModel,
                                    textModel: newTxtModel 
                                 };
@@ -782,8 +908,8 @@ const FlowEditor = () => {
                                 const newVal = e.target.value;
                                 setAppSettings(prev => ({ 
                                     ...prev, 
-                                    apiKey: newVal, // Update Active
-                                    keys: { ...prev.keys, [prev.provider]: newVal } // Update Storage
+                                    apiKey: newVal, 
+                                    keys: { ...prev.keys, [prev.provider]: newVal } 
                                 }));
                             }}
                             placeholder={appSettings.provider === Provider.GOOGLE ? "Leave empty to use default env key" : "sk-..."}

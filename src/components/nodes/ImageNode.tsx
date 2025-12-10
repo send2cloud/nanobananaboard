@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, NodeProps, NodeResizer } from 'reactflow';
-import { Loader2, Download, Maximize2, X, Pencil, Plus, GitBranch } from 'lucide-react';
+import { Loader2, Download, Maximize2, X, Pencil, Plus, GitBranch, Heart } from 'lucide-react';
 import { ImageNodeData } from '../../types';
 
 export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, selected }) => {
@@ -45,6 +45,16 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
     setEditPrompt('');
   };
 
+  const handleDownload = () => {
+    if (!data.imageUrl) return;
+    const link = document.createElement('a');
+    link.href = data.imageUrl;
+    // Use prompt slug in filename if possible
+    const slug = data.prompt ? data.prompt.slice(0, 20).replace(/[^a-z0-9]/gi, '_') : 'image';
+    link.download = `nano-banana-${slug}-${id}.png`;
+    link.click();
+  };
+
   return (
     <>
     <NodeResizer color="#3b82f6" isVisible={selected} minWidth={200} minHeight={200} />
@@ -57,6 +67,19 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
                <span className="px-1.5 py-0.5 rounded bg-black/50 backdrop-blur text-[9px] text-white border border-white/10 uppercase">{data.config.aspectRatio}</span>
                {modelLabel !== 'Nano Flash' && <span className={`px-1.5 py-0.5 rounded ${badgeColor}/20 text-white border ${badgeColor}/30 text-[9px] uppercase`}>{modelLabel}</span>}
             </div>
+            
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if(data.imageUrl && data.prompt && data.onAddToClipboard) {
+                        data.onAddToClipboard(data.imageUrl, data.prompt, id);
+                    }
+                }}
+                className="pointer-events-auto p-1.5 rounded-full bg-black/50 hover:bg-pink-500/50 hover:text-white text-zinc-300 border border-white/10 transition-colors"
+                title="Add to Clipboard"
+            >
+                <Heart className="w-3.5 h-3.5" />
+            </button>
          </div>
       )}
 
@@ -100,10 +123,7 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
                         <button 
                             onClick={(e) => {
                                 e.stopPropagation();
-                                const link = document.createElement('a');
-                                link.href = data.imageUrl!;
-                                link.download = `nano-banana-${id}.png`;
-                                link.click();
+                                handleDownload();
                             }}
                             className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors"
                             title="Download"
@@ -168,7 +188,7 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
               <X className="w-6 h-6" />
            </button>
 
-           <div className="w-full h-full p-8 flex flex-col items-center justify-center">
+           <div className="w-full h-full p-8 flex flex-col items-center justify-center relative">
               <div className="flex-1 w-full h-full flex items-center justify-center overflow-hidden">
                  <img 
                     src={data.imageUrl} 
@@ -177,30 +197,32 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
                  />
               </div>
 
-              <div className="mt-6 flex items-center gap-6 shrink-0">
-                 <p className="text-sm text-zinc-400 max-w-lg truncate text-center">{data.prompt}</p>
-                 <div className="h-4 w-px bg-zinc-800"></div>
-                 <button 
-                    onClick={() => {
-                        const link = document.createElement('a');
-                        link.href = data.imageUrl!;
-                        link.download = `nano-banana-${id}.png`;
-                        link.click();
-                    }}
-                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors"
-                 >
-                    <Download className="w-4 h-4" /> Download
-                 </button>
-                 <button 
-                    onClick={() => {
-                        data.onAddVariation && data.onAddVariation(id);
-                        setLightboxOpen(false);
-                    }}
-                    className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors"
-                 >
-                    <GitBranch className="w-4 h-4" />
-                    Variations
-                 </button>
+              {/* Enhanced Footer with full prompt visibility */}
+              <div className="mt-4 w-full max-w-4xl flex flex-col items-center gap-4 shrink-0 bg-zinc-900/50 p-4 rounded-xl border border-white/10 backdrop-blur">
+                 <div className="max-h-[100px] overflow-y-auto w-full custom-scrollbar">
+                    <p className="text-sm text-zinc-300 text-center">{data.prompt}</p>
+                 </div>
+                 
+                 <div className="h-px w-full bg-white/10"></div>
+                 
+                 <div className="flex gap-4">
+                     <button 
+                        onClick={handleDownload}
+                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors border border-white/10"
+                     >
+                        <Download className="w-4 h-4" /> Download
+                     </button>
+                     <button 
+                        onClick={() => {
+                            data.onAddVariation && data.onAddVariation(id);
+                            setLightboxOpen(false);
+                        }}
+                        className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors border border-white/10"
+                     >
+                        <GitBranch className="w-4 h-4" />
+                        Variations
+                     </button>
+                 </div>
               </div>
            </div>
         </div>,

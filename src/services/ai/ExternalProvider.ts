@@ -66,7 +66,7 @@ export class ExternalProvider implements IAIProvider {
       }
   }
 
-  async generateImage(config: GenerationConfig, settings: AppSettings): Promise<string> {
+  async generateImage(config: GenerationConfig, settings: AppSettings, inputImage?: string): Promise<string> {
     const apiKey = settings.apiKey;
     if (!apiKey) throw new Error("API Key is missing for external provider.");
 
@@ -75,13 +75,26 @@ export class ExternalProvider implements IAIProvider {
 
     // Decide if Chat Completion or Image Generation Endpoint
     // OpenRouter uses chat completions for Gemini models
-    const isChat = this.isCustom || model.includes('gemini') || model.includes('chat');
+    // OR if we have an input image (Multimodal), we force Chat Completion
+    const isChat = this.isCustom || model.includes('gemini') || model.includes('chat') || !!inputImage;
     
     if (isChat) {
         const endpoint = this.getEndpoint('/chat/completions');
+        
+        let messagesContent: any = fullPrompt;
+        
+        if (inputImage) {
+            messagesContent = [
+                { type: "text", text: fullPrompt },
+                { type: "image_url", image_url: { url: inputImage } }
+            ];
+        } else {
+             messagesContent = [{ type: "text", text: fullPrompt }];
+        }
+
         const body: any = {
             model,
-            messages: [{ role: "user", content: fullPrompt }]
+            messages: [{ role: "user", content: messagesContent }]
         };
         
         if (this.isCustom) {
@@ -109,7 +122,9 @@ export class ExternalProvider implements IAIProvider {
         throw new Error("No image found in chat response.");
 
     } else {
-        // Standard OpenAI Image Endpoint
+        // Standard OpenAI Image Endpoint (Only for Text-to-Image)
+        if (inputImage) throw new Error("Standard OpenAI Image endpoint does not support image-to-image.");
+
         const endpoint = this.getEndpoint('/images/generations');
         const sizeMap: Record<string, string> = {
             '1:1': '1024x1024',

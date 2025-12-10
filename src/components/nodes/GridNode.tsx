@@ -93,36 +93,39 @@ export const GridNode: React.FC<NodeProps<GridNodeData>> = ({ id, data, selected
                  </button>
               </div>
 
-              <div className="mt-4 flex items-center gap-6 shrink-0 z-50">
-                 <div className="text-center">
-                    <p className="text-sm text-zinc-400 font-mono mb-1">{lightboxIndex + 1} / {data.images.length}</p>
-                    <p className="text-xs text-zinc-600 max-w-md truncate">{currentImage.prompt}</p>
+              {/* Improved Footer with full prompt */}
+              <div className="mt-4 w-full max-w-4xl flex flex-col items-center gap-4 shrink-0 bg-zinc-900/50 p-4 rounded-xl border border-white/10 backdrop-blur z-50">
+                 <div className="max-h-[100px] overflow-y-auto w-full custom-scrollbar">
+                     <p className="text-sm text-zinc-300 text-center">{currentImage.prompt}</p>
+                     <p className="text-xs text-zinc-500 text-center mt-1 font-mono">{lightboxIndex + 1} / {data.images.length}</p>
                  </div>
-                 
-                 <div className="h-8 w-px bg-zinc-800"></div>
 
-                 <button 
-                    onClick={() => {
-                        const link = document.createElement('a');
-                        link.href = currentImage.url;
-                        link.download = `nano-banana-grid-${lightboxIndex}.png`;
-                        link.click();
-                    }}
-                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors"
-                 >
-                    <Download className="w-4 h-4" /> Download
-                 </button>
+                 <div className="h-px w-full bg-white/10"></div>
 
-                 <button 
-                    onClick={() => {
-                       data.onBranch(currentImage.url, currentImage.prompt, id);
-                       closeLightbox();
-                    }}
-                    className="px-6 py-2 bg-accent hover:bg-blue-600 text-white font-bold rounded-lg flex items-center gap-2 transition-colors shadow-lg shadow-blue-500/20"
-                 >
-                    <GitBranch className="w-4 h-4" />
-                    Continue Story
-                 </button>
+                 <div className="flex gap-4">
+                    <button 
+                        onClick={() => {
+                            const link = document.createElement('a');
+                            link.href = currentImage.url;
+                            link.download = `nano-banana-grid-${lightboxIndex}.png`;
+                            link.click();
+                        }}
+                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors border border-white/10"
+                    >
+                        <Download className="w-4 h-4" /> Download
+                    </button>
+
+                    <button 
+                        onClick={() => {
+                        data.onBranch(currentImage.url, currentImage.prompt, id);
+                        closeLightbox();
+                        }}
+                        className="px-6 py-2 bg-accent hover:bg-blue-600 text-white font-bold rounded-lg flex items-center gap-2 transition-colors shadow-lg shadow-blue-500/20"
+                    >
+                        <GitBranch className="w-4 h-4" />
+                        Continue Story
+                    </button>
+                 </div>
               </div>
            </div>
         </div>,

@@ -18,7 +18,7 @@ export class GoogleProvider implements IAIProvider {
     return parts.join(', ');
   }
 
-  async generateImage(config: GenerationConfig, settings: AppSettings): Promise<string> {
+  async generateImage(config: GenerationConfig, settings: AppSettings, inputImage?: string): Promise<string> {
     const ai = this.getClient(settings.apiKey);
     const fullPrompt = this.constructDetailedPrompt(config);
     
@@ -35,12 +35,39 @@ export class GoogleProvider implements IAIProvider {
        requestConfig.imageConfig.imageSize = "1K";
     }
 
+    let contents;
+
+    // Handle Multimodal Input
+    if (inputImage) {
+        let mimeType = 'image/png';
+        let data = '';
+
+        if (inputImage.startsWith('data:')) {
+            const matches = inputImage.match(/^data:(.+);base64,(.+)$/);
+            if (matches) {
+                mimeType = matches[1];
+                data = matches[2];
+            }
+        } else {
+             data = inputImage.replace(/^data:image\/\w+;base64,/, "");
+        }
+
+        contents = {
+            parts: [
+                { inlineData: { mimeType, data } },
+                { text: fullPrompt }
+            ]
+        };
+    } else {
+        contents = {
+            parts: [{ text: fullPrompt }]
+        };
+    }
+
     try {
         const response = await ai.models.generateContent({
           model: modelToUse,
-          contents: {
-            parts: [{ text: fullPrompt }],
-          },
+          contents: contents,
           config: requestConfig
         });
 
@@ -73,8 +100,6 @@ export class GoogleProvider implements IAIProvider {
             data = matches[2];
         }
     } else if (inputImage.startsWith('http')) {
-        // Simple fetch for remote images (Google allows URL in some contexts but for variation we usually send bytes)
-        // Here we stick to the existing logic of fetching and converting
         try {
             const resp = await fetch(inputImage);
             const blob = await resp.blob();

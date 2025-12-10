@@ -1,22 +1,26 @@
 import { GenerationConfig, AppSettings, Provider, MODEL_OPTIONS } from '../types';
 import { getProvider } from './ai/Factory';
 
+// Polyfill for process if it's undefined (browser env)
+declare const process: any;
+
 // --- Facade Functions for StoryboardFlow ---
 
 export const generateImageFromConfig = async (
   config: GenerationConfig, 
-  settings?: AppSettings
+  settings?: AppSettings,
+  inputImage?: string 
 ): Promise<string> => {
     // Default to Google if no settings provided, or if settings exist but no provider set
     const providerType = settings?.provider || Provider.GOOGLE;
     const provider = getProvider(providerType);
     
     // Ensure we have a valid settings object even if undefined passed
-    const safeSettings = settings || { 
+    const safeSettings: AppSettings = settings || { 
         provider: Provider.GOOGLE, apiKey: '', keys: {} as any 
     };
 
-    return await provider.generateImage(config, safeSettings);
+    return await provider.generateImage(config, safeSettings, inputImage);
 };
 
 export const generateImageVariation = async (
@@ -28,7 +32,7 @@ export const generateImageVariation = async (
     const providerType = settings?.provider || Provider.GOOGLE;
     const provider = getProvider(providerType);
     
-    const safeSettings = settings || { 
+    const safeSettings: AppSettings = settings || { 
         provider: Provider.GOOGLE, apiKey: '', keys: {} as any 
     };
 
