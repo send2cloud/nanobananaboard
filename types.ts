@@ -39,6 +39,7 @@ export interface ImageNodeData {
   config?: GenerationConfig;
   loading?: boolean;
   onAddVariation?: (id: string) => void;
+  onEdit?: (id: string, prompt: string) => void; // New callback for editing
   generatedBy?: string; 
 }
 

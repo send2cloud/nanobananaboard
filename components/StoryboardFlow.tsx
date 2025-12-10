@@ -27,7 +27,7 @@ import {
   AppSettings,
   Provider
 } from '../types';
-import { generateImageFromConfig, generateImageVariation, getVariationSuggestions, enhancePrompt } from '../services/geminiService';
+import { generateImageFromConfig, generateImageVariation, getVariationSuggestions, enhancePrompt, editGeneratedImage } from '../services/geminiService';
 import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, ChevronDown, ChevronUp } from 'lucide-react';
 
 const NODE_WIDTH = 400;
@@ -137,6 +137,7 @@ const FlowEditor = () => {
   const handleToggleCollapseRef = useRef<(id: string, collapsed: boolean) => void>(() => {});
   const handleSuggestRef = useRef<(category: string, count: number, context: string) => Promise<string[]>>((c, n, ctx) => Promise.resolve([]));
   const handleEnhanceRef = useRef<(config: GenerationConfig) => Promise<string>>(() => Promise.resolve(""));
+  const handleEditImageRef = useRef<(id: string, prompt: string) => void>(() => {});
   const appSettingsRef = useRef<AppSettings>(appSettings);
 
   // Update ref when settings change
@@ -345,6 +346,7 @@ const FlowEditor = () => {
             imageUrl,
             prompt,
             onAddVariation: (id) => handleAddVariationRef.current(id),
+            onEdit: (id, p) => handleEditImageRef.current(id, p),
             generatedBy: 'Branch',
             loading: false
         }
@@ -439,6 +441,82 @@ const FlowEditor = () => {
      }
   }, [setNodes, setEdges, findPositionForNewNode, fitView, getNodes]);
 
+  const handleEditImage = useCallback(async (nodeId: string, instructions: string) => {
+    // 1. Mark node as loading
+    setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: true } } : n));
+    
+    const currentNodes = getNodes();
+    const sourceNode = currentNodes.find(n => n.id === nodeId);
+    if (!sourceNode || !sourceNode.data.imageUrl) {
+        setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n));
+        return;
+    }
+
+    try {
+        // 2. Determine model
+        let modelToUse = 'gemini-2.5-flash-image';
+        const currentProvider = appSettingsRef.current.provider;
+        
+        if (currentProvider === Provider.GOOGLE && sourceNode.data.generatedBy) {
+            modelToUse = sourceNode.data.generatedBy;
+        } else if (currentProvider !== Provider.GOOGLE) {
+            modelToUse = appSettingsRef.current.imageModel || 'External';
+        }
+
+        // 3. Call Edit Service
+        const newImageUrl = await editGeneratedImage(
+            sourceNode.data.imageUrl, 
+            instructions, 
+            modelToUse, 
+            appSettingsRef.current
+        );
+
+        // 4. Create New Node
+        const nodesAfterGen = getNodes();
+        const freshSourceNode = nodesAfterGen.find(n => n.id === nodeId);
+        if (!freshSourceNode) return;
+
+        const newPos = findPositionForNewNode(nodesAfterGen, freshSourceNode);
+        const newImageId = `img-edit-${Date.now()}`;
+
+        const newNode: Node<ImageNodeData> = {
+            id: newImageId,
+            type: NodeType.IMAGE,
+            position: newPos,
+            data: {
+                imageUrl: newImageUrl,
+                prompt: `Edited: ${instructions}`,
+                onAddVariation: (id) => handleAddVariationRef.current(id),
+                onEdit: (id, p) => handleEditImageRef.current(id, p),
+                generatedBy: modelToUse,
+                loading: false
+            }
+        };
+
+        setNodes(nds => {
+            // Restore loading state of source
+            const loaded = nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n);
+            return [...loaded, newNode];
+        });
+
+        setEdges(eds => addEdge({
+            id: `e-${nodeId}-${newImageId}`,
+            source: nodeId,
+            target: newImageId,
+            animated: true,
+            style: { stroke: '#a855f7', strokeWidth: 2 } // Purple edge for edits
+        }, eds));
+
+        setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
+
+    } catch (e) {
+        console.error(e);
+        alert(`Edit failed: ${e instanceof Error ? e.message : String(e)}`);
+        setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n));
+    }
+
+  }, [setNodes, setEdges, findPositionForNewNode, fitView, getNodes]);
+
   const handleAddVariation = useCallback((parentId: string) => {
     setNodes(currentNodes => {
         const parentNode = currentNodes.find(n => n.id === parentId);
@@ -525,6 +603,7 @@ const FlowEditor = () => {
                 prompt: config.prompt,
                 config: config,
                 onAddVariation: handleAddVariation,
+                onEdit: handleEditImage, // Pass the handler
                 loading: false,
                 generatedBy: generatedBy
             }
@@ -556,7 +635,7 @@ const FlowEditor = () => {
             return node;
         }));
     }
-  }, [setNodes, setEdges, findPositionForNewNode, fitView, handleAddVariation, getNodes]);
+  }, [setNodes, setEdges, findPositionForNewNode, fitView, handleAddVariation, handleEditImage, getNodes]);
 
   // Update refs and listeners
   useEffect(() => {
@@ -566,18 +645,19 @@ const FlowEditor = () => {
     handleToggleCollapseRef.current = handleToggleCollapse;
     handleSuggestRef.current = handleSuggestVariations;
     handleEnhanceRef.current = handleEnhancePrompt;
-  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt]);
+    handleEditImageRef.current = handleEditImage;
+  }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, handleEditImage]);
 
   useEffect(() => {
     setNodes((nds) => nds.map(n => {
         if (n.type === NodeType.START) return { ...n, data: { ...n.data, onGenerate: handleInitialGenerate, onEnhancePrompt: handleEnhancePrompt } };
-        if (n.type === NodeType.IMAGE) return { ...n, data: { ...n.data, onAddVariation: handleAddVariation } };
+        if (n.type === NodeType.IMAGE) return { ...n, data: { ...n.data, onAddVariation: handleAddVariation, onEdit: handleEditImage } };
         if (n.type === NodeType.VARIATION) return { ...n, data: { ...n.data, onGenerate: handleRunVariation, onSuggest: handleSuggestVariations } };
         if (n.type === NodeType.GRID) return { ...n, data: { ...n.data, onBranch: handleBranch } };
         if (n.type === NodeType.GROUP) return { ...n, data: { ...n.data, onUngroup: handleUngroup, onToggleCollapse: handleToggleCollapse } };
         return n;
     }));
-  }, [handleInitialGenerate, handleAddVariation, handleRunVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, setNodes]);
+  }, [handleInitialGenerate, handleAddVariation, handleRunVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, handleEditImage, setNodes]);
 
 
   return (

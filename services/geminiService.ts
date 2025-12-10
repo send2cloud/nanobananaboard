@@ -480,3 +480,21 @@ export const generateImageVariation = async (
     throw error;
   }
 };
+
+/**
+ * Specifically edits an image based on instructions.
+ */
+export const editGeneratedImage = async (
+    inputImage: string,
+    instructions: string,
+    model: string,
+    settings?: AppSettings
+): Promise<string> => {
+    // We reuse the logic but with a more direct prompt prefix for editing
+    return await generateImageVariation(
+        inputImage, 
+        `Edit this image according to these instructions: ${instructions}`, 
+        model, 
+        settings
+    );
+};

@@ -28,7 +28,8 @@ import {
   Server,
   Zap,
   Box,
-  Sparkles
+  Sparkles,
+  Pencil
 } from 'lucide-react';
 import { 
   StartNodeData, 
@@ -328,6 +329,8 @@ export const StartNode: React.FC<NodeProps<StartNodeData>> = ({ data, selected }
 
 export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, selected }) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editPrompt, setEditPrompt] = useState('');
 
   // Logic to display model name nicely
   let modelLabel = 'Nano Flash';
@@ -361,13 +364,20 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [lightboxOpen]);
 
+  const handleRunEdit = () => {
+    if (!editPrompt.trim() || !data.onEdit) return;
+    data.onEdit(id, editPrompt);
+    setIsEditing(false);
+    setEditPrompt('');
+  };
+
   return (
     <>
     <div className={`relative group rounded-2xl overflow-hidden bg-black border-2 transition-all duration-300 w-[320px] shadow-2xl ${selected ? 'border-accent shadow-accent/20' : 'border-zinc-800'}`}>
       <Handle type="target" position={Position.Left} className="!bg-zinc-500 !w-3 !h-3 !border-4 !border-black" />
       
       {/* Header Info */}
-      {data.config && (
+      {data.config && !isEditing && (
          <div className="absolute top-0 left-0 right-0 p-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-b from-black/80 to-transparent flex justify-between items-start pointer-events-none">
             <div className="flex gap-1">
                <span className="px-1.5 py-0.5 rounded bg-black/50 backdrop-blur text-[9px] text-white border border-white/10 uppercase">{data.config.aspectRatio}</span>
@@ -376,53 +386,77 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
          </div>
       )}
 
+      {/* Main Content Area: Either Image or Edit Input */}
       <div 
-        className={`relative bg-zinc-900 flex items-center justify-center cursor-zoom-in ${data.config?.aspectRatio === '9:16' ? 'aspect-[9/16]' : data.config?.aspectRatio === '16:9' ? 'aspect-video' : data.config?.aspectRatio === '4:3' ? 'aspect-[4/3]' : data.config?.aspectRatio === '3:4' ? 'aspect-[3/4]' : 'aspect-square'}`}
-        onClick={() => !data.loading && data.imageUrl && setLightboxOpen(true)}
+        className={`relative bg-zinc-900 flex items-center justify-center ${data.config?.aspectRatio === '9:16' ? 'aspect-[9/16]' : data.config?.aspectRatio === '16:9' ? 'aspect-video' : data.config?.aspectRatio === '4:3' ? 'aspect-[4/3]' : data.config?.aspectRatio === '3:4' ? 'aspect-[3/4]' : 'aspect-square'}`}
+        onClick={() => !data.loading && !isEditing && data.imageUrl && setLightboxOpen(true)}
       >
-        {data.loading ? (
-          <div className="flex flex-col items-center gap-2 text-zinc-500">
-            <Loader2 className="w-8 h-8 animate-spin text-accent" />
-            <span className="text-xs font-mono uppercase tracking-widest">Generating...</span>
-          </div>
-        ) : data.imageUrl ? (
-          <>
-             <img src={data.imageUrl} alt="Generated" className="w-full h-full object-cover" />
-             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 pointer-events-none">
-                <p className="text-white text-xs line-clamp-3 mb-3 font-light">{data.prompt}</p>
-                <div className="flex items-center gap-2 pointer-events-auto">
-                   <button 
-                     onClick={(e) => {
-                        e.stopPropagation();
-                        const link = document.createElement('a');
-                        link.href = data.imageUrl!;
-                        link.download = `nano-banana-${id}.png`;
-                        link.click();
-                     }}
-                     className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors"
-                     title="Download"
-                    >
-                     <Download className="w-4 h-4" />
-                   </button>
-                   <button 
-                     onClick={(e) => {
-                        e.stopPropagation();
-                        setLightboxOpen(true);
-                     }}
-                     className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors"
-                     title="Expand"
-                    >
-                     <Maximize2 className="w-4 h-4" />
-                   </button>
-                </div>
-             </div>
-          </>
+        {isEditing ? (
+           <div className="absolute inset-0 bg-zinc-900 p-4 flex flex-col z-20" onClick={(e) => e.stopPropagation()}>
+               <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs font-bold text-zinc-400 uppercase">Edit Instructions</span>
+                  <button onClick={() => setIsEditing(false)} className="text-zinc-500 hover:text-white"><X className="w-4 h-4"/></button>
+               </div>
+               <textarea 
+                  className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-3 text-sm text-zinc-200 resize-none focus:outline-none focus:border-accent"
+                  placeholder="e.g. Change the car to a helicopter..."
+                  value={editPrompt}
+                  onChange={(e) => setEditPrompt(e.target.value)}
+                  autoFocus
+               />
+               <button 
+                  onClick={handleRunEdit}
+                  disabled={!editPrompt.trim()}
+                  className="mt-3 w-full py-2 bg-accent hover:bg-blue-600 text-white font-bold rounded text-xs transition-colors disabled:opacity-50"
+               >
+                  Run Edit
+               </button>
+           </div>
         ) : (
-          <span className="text-zinc-700">No Image</span>
+            data.loading ? (
+                <div className="flex flex-col items-center gap-2 text-zinc-500">
+                    <Loader2 className="w-8 h-8 animate-spin text-accent" />
+                    <span className="text-xs font-mono uppercase tracking-widest">Generating...</span>
+                </div>
+            ) : data.imageUrl ? (
+                <>
+                    <img src={data.imageUrl} alt="Generated" className={`w-full h-full object-cover ${!isEditing ? 'cursor-zoom-in' : ''}`} />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 pointer-events-none">
+                        <p className="text-white text-xs line-clamp-3 mb-3 font-light">{data.prompt}</p>
+                        <div className="flex items-center gap-2 pointer-events-auto">
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const link = document.createElement('a');
+                                link.href = data.imageUrl!;
+                                link.download = `nano-banana-${id}.png`;
+                                link.click();
+                            }}
+                            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors"
+                            title="Download"
+                            >
+                            <Download className="w-4 h-4" />
+                        </button>
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setLightboxOpen(true);
+                            }}
+                            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-colors"
+                            title="Expand"
+                            >
+                            <Maximize2 className="w-4 h-4" />
+                        </button>
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <span className="text-zinc-700">No Image</span>
+            )
         )}
       </div>
 
-      {!data.loading && data.imageUrl && (
+      {!data.loading && data.imageUrl && !isEditing && (
         <div className="p-3 bg-zinc-950 border-t border-zinc-800 flex justify-between items-center">
             <div className="flex items-center gap-1.5">
                 <div className={`w-2 h-2 rounded-full ${badgeColor}`}></div>
@@ -430,13 +464,22 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
                   {modelLabel}
                 </span>
             </div>
-            <button
-                onClick={() => data.onAddVariation && data.onAddVariation(id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg text-xs font-medium text-zinc-300 transition-colors"
-            >
-                <Plus className="w-3 h-3" />
-                Variations
-            </button>
+            <div className="flex items-center gap-2">
+                <button
+                    onClick={() => setIsEditing(true)}
+                    className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
+                    title="Edit Image"
+                >
+                    <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button
+                    onClick={() => data.onAddVariation && data.onAddVariation(id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg text-xs font-medium text-zinc-300 transition-colors"
+                >
+                    <Plus className="w-3 h-3" />
+                    Variations
+                </button>
+            </div>
         </div>
       )}
 
