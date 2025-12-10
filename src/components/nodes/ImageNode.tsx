@@ -49,7 +49,6 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
     if (!data.imageUrl) return;
     const link = document.createElement('a');
     link.href = data.imageUrl;
-    // Use prompt slug in filename if possible
     const slug = data.prompt ? data.prompt.slice(0, 20).replace(/[^a-z0-9]/gi, '_') : 'image';
     link.download = `nano-banana-${slug}-${id}.png`;
     link.click();
@@ -198,9 +197,9 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
               </div>
 
               {/* Enhanced Footer with full prompt visibility */}
-              <div className="mt-4 w-full max-w-4xl flex flex-col items-center gap-4 shrink-0 bg-zinc-900/50 p-4 rounded-xl border border-white/10 backdrop-blur">
-                 <div className="max-h-[100px] overflow-y-auto w-full custom-scrollbar">
-                    <p className="text-sm text-zinc-300 text-center">{data.prompt}</p>
+              <div className="mt-4 w-full max-w-4xl flex flex-col items-center gap-4 shrink-0 bg-zinc-900/50 p-6 rounded-xl border border-white/10 backdrop-blur">
+                 <div className="max-h-[100px] overflow-y-auto w-full custom-scrollbar text-center">
+                    <p className="text-sm text-zinc-300 font-medium leading-relaxed">{data.prompt}</p>
                  </div>
                  
                  <div className="h-px w-full bg-white/10"></div>
@@ -208,19 +207,19 @@ export const ImageNode: React.FC<NodeProps<ImageNodeData>> = ({ id, data, select
                  <div className="flex gap-4">
                      <button 
                         onClick={handleDownload}
-                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors border border-white/10"
+                        className="px-6 py-3 bg-white text-black text-sm font-bold rounded-full flex items-center gap-2 hover:bg-zinc-200 transition-colors shadow-lg shadow-white/10"
                      >
-                        <Download className="w-4 h-4" /> Download
+                        <Download className="w-5 h-5" /> Download Image
                      </button>
                      <button 
                         onClick={() => {
                             data.onAddVariation && data.onAddVariation(id);
                             setLightboxOpen(false);
                         }}
-                        className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-full flex items-center gap-2 transition-colors border border-white/10"
+                        className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold rounded-full flex items-center gap-2 transition-colors border border-white/10"
                      >
-                        <GitBranch className="w-4 h-4" />
-                        Variations
+                        <GitBranch className="w-5 h-5" />
+                        Create Variations
                      </button>
                  </div>
               </div>

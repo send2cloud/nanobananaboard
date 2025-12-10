@@ -63,7 +63,13 @@ export const VariationNode: React.FC<NodeProps<VariationNodeData>> = ({ id, data
 
   return (
     <NodeWrapper selected={selected} title="Configuration" width="w-[380px]">
-      <NodeResizer color="#3b82f6" isVisible={selected} minWidth={300} minHeight={300} />
+      <NodeResizer 
+         color="#3b82f6" 
+         isVisible={selected} 
+         minWidth={300} 
+         minHeight={300}
+         handleStyle={{ width: 12, height: 12, borderRadius: 3 }} 
+      />
       <Handle type="target" position={Position.Left} className="!bg-zinc-500 !w-3 !h-3 !border-4 !border-surface" />
       
       <div className="grid grid-cols-4 gap-1 mb-4">

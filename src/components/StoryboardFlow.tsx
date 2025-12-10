@@ -37,7 +37,7 @@ import {
   ClipboardItem
 } from '../types';
 import { generateImageFromConfig, generateImageVariation, getVariationSuggestions, enhancePrompt, editGeneratedImage } from '../services/geminiService';
-import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, Download, Upload, HardDrive } from 'lucide-react';
+import { Settings, X, Layers, AlertCircle, RefreshCw, CheckCircle2, Save, Download, Upload, HardDrive, PlusSquare } from 'lucide-react';
 import { useAppSettings } from '../hooks/useAppSettings';
 import { useGraphLayout } from '../hooks/useGraphLayout';
 import { useProjectPersistence } from '../hooks/useProjectPersistence';
@@ -130,183 +130,7 @@ const FlowEditor = () => {
     [NodeType.SOURCE]: SourceNode,
   }), []);
 
-  // --- Connection Logic ---
-  const onConnect = useCallback((params: Connection) => {
-      setEdges((eds) => addEdge({ 
-        ...params, 
-        animated: true, 
-        style: { stroke: '#52525b', strokeWidth: 2 } 
-      }, eds));
-
-      // Check if connecting Image -> SourceNode
-      const targetNode = getNodes().find(n => n.id === params.target);
-      const sourceNode = getNodes().find(n => n.id === params.source);
-
-      if (targetNode?.type === NodeType.SOURCE && (sourceNode?.type === NodeType.IMAGE || sourceNode?.type === NodeType.GRID)) {
-          let imageUrl = '';
-          if (sourceNode.type === NodeType.IMAGE) {
-              imageUrl = (sourceNode.data as ImageNodeData).imageUrl || '';
-          }
-          // Note: Logic for Grid connection is trickier as Grid has multiple images, usually handled via 'Branch' button
-          
-          if (imageUrl) {
-              setNodes(nds => nds.map(n => n.id === params.target ? {
-                  ...n,
-                  data: { ...n.data, inputImage: imageUrl }
-              } : n));
-              notify("Source Node updated with input image");
-          }
-      }
-
-  }, [setEdges, getNodes, setNodes, notify]);
-
-
-  // --- Clipboard Logic ---
-  const handleAddToClipboard = useCallback((imageUrl: string, prompt: string, nodeId: string) => {
-      setClipboardItems(prev => [
-          ...prev, 
-          { id: `clip-${Date.now()}`, imageUrl, prompt, sourceNodeId: nodeId }
-      ]);
-      notify("Added to Clipboard");
-  }, [notify]);
-
-  const handleRemoveFromClipboard = useCallback((id: string) => {
-      setClipboardItems(prev => prev.filter(i => i.id !== id));
-  }, []);
-
-  const onDragStart = (e: React.DragEvent, item: ClipboardItem) => {
-      e.dataTransfer.setData('application/reactflow/clipboard', JSON.stringify(item));
-      e.dataTransfer.effectAllowed = 'copy';
-  };
-
-  const onDragOver = useCallback((event: React.DragEvent) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'copy';
-  }, []);
-
-  const onDrop = useCallback((event: React.DragEvent) => {
-      event.preventDefault();
-      const dataStr = event.dataTransfer.getData('application/reactflow/clipboard');
-      
-      if (dataStr) {
-          const item: ClipboardItem = JSON.parse(dataStr);
-          const reactFlowBounds = document.querySelector('.react-flow')?.getBoundingClientRect();
-          
-          if (reactFlowBounds) {
-             const position = project({
-                 x: event.clientX - reactFlowBounds.left,
-                 y: event.clientY - reactFlowBounds.top
-             });
-
-             const newNode: Node<SourceNodeData> = {
-                 id: `source-${Date.now()}`,
-                 type: NodeType.SOURCE,
-                 position,
-                 data: {
-                     inputImage: item.imageUrl,
-                     onGenerate: (config, img) => handleSourceGenerateRef.current(newNode.id, config, img), // Fix: pass node ID logic
-                     onEnhancePrompt: handleEnhancePrompt,
-                     loading: false
-                 }
-             };
-             
-             // We need to update the node definition immediately so the callback has access to ID
-             newNode.data.onGenerate = (config, img) => handleSourceGenerateRef.current(newNode.id, config, img);
-
-             setNodes(nds => [...nds, newNode]);
-             notify("Created Source Node from Clipboard");
-          }
-      }
-  }, [project, setNodes, notify]);
-
-
-  // --- Grouping & Layout Handlers (Keep Existing) ---
-  const handleCreateGroup = useCallback(() => {
-    const selectedNodes = getNodes().filter(n => n.selected && n.type !== NodeType.GROUP && !n.parentNode);
-    if (selectedNodes.length < 2) {
-      alert("Select at least 2 nodes to group (must not be already grouped).");
-      return;
-    }
-    const padding = 40;
-    const minX = Math.min(...selectedNodes.map(n => n.position.x));
-    const minY = Math.min(...selectedNodes.map(n => n.position.y));
-    const maxX = Math.max(...selectedNodes.map(n => n.position.x + (n.width || 400)));
-    const maxY = Math.max(...selectedNodes.map(n => n.position.y + (n.height || 400)));
-    const groupWidth = (maxX - minX) + padding * 2;
-    const groupHeight = (maxY - minY) + padding * 2;
-    const groupX = minX - padding;
-    const groupY = minY - padding;
-    const groupId = `group-${Date.now()}`;
-    const groupNode: Node<GroupNodeData> = {
-      id: groupId,
-      type: NodeType.GROUP,
-      position: { x: groupX, y: groupY },
-      style: { width: groupWidth, height: groupHeight },
-      data: { 
-          label: 'New Group', 
-          width: groupWidth, 
-          height: groupHeight,
-          onUngroup: (id) => handleUngroupRef.current(id),
-          onToggleCollapse: (id, c) => handleToggleCollapseRef.current(id, c)
-      },
-    };
-    setNodes(nds => {
-       const updatedNodes = nds.map(n => {
-           if (selectedNodes.find(sn => sn.id === n.id)) {
-               return {
-                   ...n,
-                   parentNode: groupId,
-                   extent: 'parent' as const,
-                   position: {
-                       x: n.position.x - groupX,
-                       y: n.position.y - groupY
-                   }
-               };
-           }
-           return n;
-       });
-       return [...updatedNodes, groupNode];
-    });
-  }, [getNodes, setNodes]);
-
-  const handleUngroup = useCallback((groupId: string) => {
-      const allNodes = getNodes();
-      const groupNode = allNodes.find(n => n.id === groupId);
-      if (!groupNode) return;
-      setNodes(nds => {
-          return nds.reduce((acc, n) => {
-              if (n.id === groupId) return acc;
-              if (n.parentNode === groupId) {
-                  return [...acc, {
-                      ...n,
-                      parentNode: undefined,
-                      extent: undefined,
-                      position: {
-                          x: n.position.x + groupNode.position.x,
-                          y: n.position.y + groupNode.position.y
-                      },
-                      hidden: false
-                  }];
-              }
-              return [...acc, n];
-          }, [] as Node[]);
-      });
-  }, [getNodes, setNodes]);
-
-  const handleToggleCollapse = useCallback((groupId: string, collapsed: boolean) => {
-      setNodes(nds => nds.map(n => n.id === groupId ? {
-          ...n,
-          style: {
-              ...n.style,
-              width: collapsed ? 200 : n.data.width,
-              height: collapsed ? 40 : n.data.height,
-          },
-          data: { ...n.data, isCollapsed: collapsed }
-      } : n.parentNode === groupId ? { ...n, hidden: collapsed } : n));
-  }, [setNodes]);
-
-
-  // --- Logic Handlers ---
+  // --- LOGIC HANDLERS (Defined first to avoid hoisting issues) ---
 
   const handleSuggestVariations = useCallback(async (category: string, count: number, context: string) => {
       return await getVariationSuggestions(context, category, count, appSettingsRef.current);
@@ -315,6 +139,14 @@ const FlowEditor = () => {
   const handleEnhancePrompt = useCallback(async (config: GenerationConfig) => {
       return await enhancePrompt(config, appSettingsRef.current);
   }, []);
+
+  const handleAddToClipboard = useCallback((imageUrl: string, prompt: string, nodeId: string) => {
+      setClipboardItems(prev => [
+          ...prev, 
+          { id: `clip-${Date.now()}`, imageUrl, prompt, sourceNodeId: nodeId }
+      ]);
+      notify("Added to Clipboard");
+  }, [notify]);
 
   const handleBranch = useCallback((imageUrl: string, prompt: string, parentId: string) => {
     const currentNodes = getNodes();
@@ -349,60 +181,6 @@ const FlowEditor = () => {
     }, eds));
     setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
   }, [setNodes, setEdges, findPositionForNewNode, fitView, getNodes]);
-
-  const handleSourceGenerate = useCallback(async (nodeId: string, config: GenerationConfig, image?: string) => {
-      setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: true } } : n));
-      
-      try {
-          const resultUrl = await generateImageFromConfig(config, appSettingsRef.current, image);
-          
-          const currentNodes = getNodes();
-          const sourceNode = currentNodes.find(n => n.id === nodeId);
-          if (!sourceNode) return;
-
-          const newPos = findPositionForNewNode(currentNodes, sourceNode);
-          const newImageNodeId = `img-src-${Date.now()}`;
-
-          let generatedBy = config.model;
-          if (appSettingsRef.current.provider !== Provider.GOOGLE) {
-             generatedBy = appSettingsRef.current.imageModel || 'External';
-          }
-
-          const newNode: Node<ImageNodeData> = {
-             id: newImageNodeId,
-             type: NodeType.IMAGE,
-             position: newPos,
-             data: {
-                 imageUrl: resultUrl,
-                 prompt: config.prompt,
-                 config,
-                 onAddVariation: handleAddVariationRef.current,
-                 onEdit: handleEditImageRef.current,
-                 onAddToClipboard: handleAddToClipboardRef.current,
-                 generatedBy,
-                 loading: false
-             }
-          };
-
-          setNodes(nds => {
-             const loaded = nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n);
-             return [...loaded, newNode];
-          });
-          setEdges(eds => addEdge({
-             id: `e-${nodeId}-${newImageNodeId}`,
-             source: nodeId,
-             target: newImageNodeId,
-             animated: true,
-             style: { stroke: '#a855f7', strokeWidth: 2 }
-          }, eds));
-          setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
-
-      } catch (e) {
-          console.error(e);
-          alert(`Refinement failed: ${e instanceof Error ? e.message : 'Unknown'}`);
-          setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n));
-      }
-  }, [setNodes, setEdges, getNodes, findPositionForNewNode, fitView]);
 
   const handleRunVariation = useCallback(async (nodeId: string, config: VariationConfig) => {
      setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: true } } : n));
@@ -592,6 +370,60 @@ const FlowEditor = () => {
     });
   }, [setNodes, setEdges, handleRunVariation]);
 
+  const handleSourceGenerate = useCallback(async (nodeId: string, config: GenerationConfig, image?: string) => {
+      setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: true } } : n));
+      
+      try {
+          const resultUrl = await generateImageFromConfig(config, appSettingsRef.current, image);
+          
+          const currentNodes = getNodes();
+          const sourceNode = currentNodes.find(n => n.id === nodeId);
+          if (!sourceNode) return;
+
+          const newPos = findPositionForNewNode(currentNodes, sourceNode);
+          const newImageNodeId = `img-src-${Date.now()}`;
+
+          let generatedBy = config.model;
+          if (appSettingsRef.current.provider !== Provider.GOOGLE) {
+             generatedBy = appSettingsRef.current.imageModel || 'External';
+          }
+
+          const newNode: Node<ImageNodeData> = {
+             id: newImageNodeId,
+             type: NodeType.IMAGE,
+             position: newPos,
+             data: {
+                 imageUrl: resultUrl,
+                 prompt: config.prompt,
+                 config,
+                 onAddVariation: handleAddVariationRef.current,
+                 onEdit: handleEditImageRef.current,
+                 onAddToClipboard: handleAddToClipboardRef.current,
+                 generatedBy,
+                 loading: false
+             }
+          };
+
+          setNodes(nds => {
+             const loaded = nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n);
+             return [...loaded, newNode];
+          });
+          setEdges(eds => addEdge({
+             id: `e-${nodeId}-${newImageNodeId}`,
+             source: nodeId,
+             target: newImageNodeId,
+             animated: true,
+             style: { stroke: '#a855f7', strokeWidth: 2 }
+          }, eds));
+          setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
+
+      } catch (e) {
+          console.error(e);
+          alert(`Refinement failed: ${e instanceof Error ? e.message : 'Unknown'}`);
+          setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n));
+      }
+  }, [setNodes, setEdges, getNodes, findPositionForNewNode, fitView]);
+
   const handleInitialGenerate = useCallback(async (config: GenerationConfig, uploadedImage?: string) => {
     const startNodeId = 'start-1';
     setNodes((nds) => nds.map((node) => {
@@ -664,6 +496,191 @@ const FlowEditor = () => {
     }
   }, [setNodes, setEdges, findPositionForNewNode, fitView, handleAddVariation, handleEditImage, handleAddToClipboard, getNodes]);
 
+  // --- CONNECTION & INTERACTION HANDLERS (Defined last) ---
+
+  const onConnect = useCallback((params: Connection) => {
+      setEdges((eds) => addEdge({ 
+        ...params, 
+        animated: true, 
+        style: { stroke: '#52525b', strokeWidth: 2 } 
+      }, eds));
+
+      // Check if connecting Image -> SourceNode
+      const targetNode = getNodes().find(n => n.id === params.target);
+      const sourceNode = getNodes().find(n => n.id === params.source);
+
+      if (targetNode?.type === NodeType.SOURCE && (sourceNode?.type === NodeType.IMAGE || sourceNode?.type === NodeType.GRID)) {
+          let imageUrl = '';
+          if (sourceNode.type === NodeType.IMAGE) {
+              imageUrl = (sourceNode.data as ImageNodeData).imageUrl || '';
+          }
+          
+          if (imageUrl) {
+              setNodes(nds => nds.map(n => n.id === params.target ? {
+                  ...n,
+                  data: { ...n.data, inputImage: imageUrl }
+              } : n));
+              notify("Source Node updated with input image");
+          }
+      }
+
+  }, [setEdges, getNodes, setNodes, notify]);
+
+  const handleRemoveFromClipboard = useCallback((id: string) => {
+      setClipboardItems(prev => prev.filter(i => i.id !== id));
+  }, []);
+
+  const onDragStart = (e: React.DragEvent, item: ClipboardItem) => {
+      e.dataTransfer.setData('application/reactflow/clipboard', JSON.stringify(item));
+      e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const onDragOver = useCallback((event: React.DragEvent) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onDrop = useCallback((event: React.DragEvent) => {
+      event.preventDefault();
+      const dataStr = event.dataTransfer.getData('application/reactflow/clipboard');
+      
+      if (dataStr) {
+          const item: ClipboardItem = JSON.parse(dataStr);
+          const reactFlowBounds = document.querySelector('.react-flow')?.getBoundingClientRect();
+          
+          if (reactFlowBounds) {
+             const position = project({
+                 x: event.clientX - reactFlowBounds.left,
+                 y: event.clientY - reactFlowBounds.top
+             });
+
+             const newNode: Node<SourceNodeData> = {
+                 id: `source-${Date.now()}`,
+                 type: NodeType.SOURCE,
+                 position,
+                 data: {
+                     inputImage: item.imageUrl,
+                     onGenerate: (config, img) => handleSourceGenerateRef.current(newNode.id, config, img), // Now this is safe via ref
+                     onEnhancePrompt: handleEnhancePrompt, // Now defined
+                     loading: false
+                 }
+             };
+             
+             // Ensure callback has access to ID
+             newNode.data.onGenerate = (config, img) => handleSourceGenerateRef.current(newNode.id, config, img);
+
+             setNodes(nds => [...nds, newNode]);
+             notify("Created Source Node from Clipboard");
+          }
+      }
+  }, [project, setNodes, notify, handleEnhancePrompt]);
+
+  // --- Add Source Node Manually ---
+  const handleAddSourceNode = useCallback(() => {
+      const newNode: Node<SourceNodeData> = {
+          id: `source-${Date.now()}`,
+          type: NodeType.SOURCE,
+          position: { x: 100, y: 100 },
+          data: {
+              onGenerate: (config, img) => handleSourceGenerateRef.current(newNode.id, config, img),
+              onEnhancePrompt: handleEnhancePrompt, // Now defined
+              loading: false
+          }
+      };
+      newNode.data.onGenerate = (config, img) => handleSourceGenerateRef.current(newNode.id, config, img);
+
+      setNodes(nds => [...nds, newNode]);
+      notify("Added new Refiner Node");
+  }, [setNodes, notify, handleEnhancePrompt]);
+
+
+  // --- Grouping & Layout Handlers ---
+  const handleCreateGroup = useCallback(() => {
+    const selectedNodes = getNodes().filter(n => n.selected && n.type !== NodeType.GROUP && !n.parentNode);
+    if (selectedNodes.length < 2) {
+      alert("Select at least 2 nodes to group (must not be already grouped).");
+      return;
+    }
+    const padding = 40;
+    const minX = Math.min(...selectedNodes.map(n => n.position.x));
+    const minY = Math.min(...selectedNodes.map(n => n.position.y));
+    const maxX = Math.max(...selectedNodes.map(n => n.position.x + (n.width || 400)));
+    const maxY = Math.max(...selectedNodes.map(n => n.position.y + (n.height || 400)));
+    const groupWidth = (maxX - minX) + padding * 2;
+    const groupHeight = (maxY - minY) + padding * 2;
+    const groupX = minX - padding;
+    const groupY = minY - padding;
+    const groupId = `group-${Date.now()}`;
+    const groupNode: Node<GroupNodeData> = {
+      id: groupId,
+      type: NodeType.GROUP,
+      position: { x: groupX, y: groupY },
+      style: { width: groupWidth, height: groupHeight },
+      data: { 
+          label: 'New Group', 
+          width: groupWidth, 
+          height: groupHeight,
+          onUngroup: (id) => handleUngroupRef.current(id),
+          onToggleCollapse: (id, c) => handleToggleCollapseRef.current(id, c)
+      },
+    };
+    setNodes(nds => {
+       const updatedNodes = nds.map(n => {
+           if (selectedNodes.find(sn => sn.id === n.id)) {
+               return {
+                   ...n,
+                   parentNode: groupId,
+                   extent: 'parent' as const,
+                   position: {
+                       x: n.position.x - groupX,
+                       y: n.position.y - groupY
+                   }
+               };
+           }
+           return n;
+       });
+       return [...updatedNodes, groupNode];
+    });
+  }, [getNodes, setNodes]);
+
+  const handleUngroup = useCallback((groupId: string) => {
+      const allNodes = getNodes();
+      const groupNode = allNodes.find(n => n.id === groupId);
+      if (!groupNode) return;
+      setNodes(nds => {
+          return nds.reduce((acc, n) => {
+              if (n.id === groupId) return acc;
+              if (n.parentNode === groupId) {
+                  return [...acc, {
+                      ...n,
+                      parentNode: undefined,
+                      extent: undefined,
+                      position: {
+                          x: n.position.x + groupNode.position.x,
+                          y: n.position.y + groupNode.position.y
+                      },
+                      hidden: false
+                  }];
+              }
+              return [...acc, n];
+          }, [] as Node[]);
+      });
+  }, [getNodes, setNodes]);
+
+  const handleToggleCollapse = useCallback((groupId: string, collapsed: boolean) => {
+      setNodes(nds => nds.map(n => n.id === groupId ? {
+          ...n,
+          style: {
+              ...n.style,
+              width: collapsed ? 200 : n.data.width,
+              height: collapsed ? 40 : n.data.height,
+          },
+          data: { ...n.data, isCollapsed: collapsed }
+      } : n.parentNode === groupId ? { ...n, hidden: collapsed } : n));
+  }, [setNodes]);
+
+  // --- Effects to Update Refs ---
+
   useEffect(() => {
     handleAddVariationRef.current = handleAddVariation;
     handleBranchRef.current = handleBranch;
@@ -675,6 +692,8 @@ const FlowEditor = () => {
     handleAddToClipboardRef.current = handleAddToClipboard;
     handleSourceGenerateRef.current = handleSourceGenerate;
   }, [handleAddVariation, handleBranch, handleUngroup, handleToggleCollapse, handleSuggestVariations, handleEnhancePrompt, handleEditImage, handleAddToClipboard, handleSourceGenerate]);
+
+  // --- Effect to Update Node Callbacks ---
 
   useEffect(() => {
     setNodes((nds) => nds.map(n => {
@@ -746,6 +765,17 @@ const FlowEditor = () => {
         <Controls className="bg-surface border border-border rounded-lg overflow-hidden shadow-xl" />
         
         <Panel position="top-right" className="flex gap-2">
+           <button 
+             onClick={handleAddSourceNode}
+             className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white border border-purple-500 rounded text-xs font-bold flex items-center gap-2 shadow-lg"
+             title="Add Refiner Node"
+           >
+             <PlusSquare className="w-4 h-4" />
+             Refiner +
+           </button>
+
+           <div className="h-8 w-px bg-zinc-700 mx-1"></div>
+
            <button 
              onClick={handleCreateGroup}
              className="px-3 py-1.5 bg-surface border border-border text-zinc-300 rounded hover:bg-zinc-800 text-xs font-medium flex items-center gap-2 shadow-lg"
