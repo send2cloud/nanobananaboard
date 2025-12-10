@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nano Banana Storyboarder</title>
+    <!-- Tailwind via CDN is kept for simplicity, though npm installation is recommended for production -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/style.min.css" rel="stylesheet">
     <script>
@@ -64,18 +65,21 @@
   <script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.32.0",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
     "react/": "https://aistudiocdn.com/react@^19.2.1/",
-    "react": "https://aistudiocdn.com/react@^19.2.1",
     "reactflow": "https://aistudiocdn.com/reactflow@^11.11.4",
-    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.1"
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.32.0",
+    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://aistudiocdn.com/vite@^7.2.7"
   }
 }
 </script>
 </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
