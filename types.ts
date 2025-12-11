@@ -1,24 +1,14 @@
-import { Node } from 'reactflow';
+import { Node } from 'reactflow'; // Keep only one import
+export * from './enums';
+import { NodeType, Provider, VariationCategory } from './enums';
 
-export enum NodeType {
-  START = 'start',
-  IMAGE = 'image',
-  VARIATION = 'variation',
-  GRID = 'grid',
-  GROUP = 'group',
-}
 
-export enum Provider {
-  GOOGLE = 'google',
-  OPENAI = 'openai',
-  CUSTOM = 'custom', // Replaces OPENROUTER to be more generic/accurate
-}
 
 export interface AppSettings {
   provider: Provider;
   apiKey: string; // The currently active key
   keys: Record<Provider, string>; // Per-provider key storage
-  baseUrl?: string; 
+  baseUrl?: string;
   imageModel?: string; // Replaces modelOverride
   textModel?: string; // New for suggestions
 }
@@ -40,7 +30,7 @@ export interface ImageNodeData {
   loading?: boolean;
   onAddVariation?: (id: string) => void;
   onEdit?: (id: string, prompt: string) => void; // New callback for editing
-  generatedBy?: string; 
+  generatedBy?: string;
 }
 
 export interface VariationNodeData {
@@ -50,6 +40,8 @@ export interface VariationNodeData {
   onGenerate: (id: string, config: VariationConfig) => void;
   onSuggest: (category: string, count: number, parentPrompt: string) => Promise<string[]>; // AI Suggestion Callback
   loading?: boolean;
+  provider?: Provider; // Inherit provider context
+  globalModel?: string; // Inherit global model context
 }
 
 export interface StartNodeData {
@@ -89,17 +81,12 @@ export interface VariationConfig {
 
 export type StoryboardNode = Node<ImageNodeData | VariationNodeData | StartNodeData | GridNodeData | GroupNodeData>;
 
-export enum VariationCategory {
-  CAMERA = 'Camera Angles',
-  NARRATIVE = 'Narrative',
-  ENVIRONMENT = 'Environment',
-  STYLE = 'Artistic Style',
-  CUSTOM = 'Custom',
-}
+// VariationCategory is now exported from ./enums
+
 
 export const MODEL_OPTIONS = {
-  FLASH: 'gemini-2.5-flash-image', 
-  PRO: 'gemini-3-pro-image-preview', 
+  FLASH: 'gemini-2.5-flash-image',
+  PRO: 'gemini-3-pro-image-preview',
 };
 
 export const ASPECT_RATIOS = [
