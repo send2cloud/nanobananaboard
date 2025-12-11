@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'fs';
@@ -7,6 +8,12 @@ const packageJson = JSON.parse(readFileSync('./package.json', 'utf-8'));
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.ts',
+    css: false,
+  },
   define: {
     // Polyfill process.env for the Google SDK to prevent build errors
     'process.env': {},

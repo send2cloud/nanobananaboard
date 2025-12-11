@@ -7,11 +7,10 @@ export const getProvider = (providerType: Provider): IAIProvider => {
     switch (providerType) {
         case Provider.GOOGLE:
             return new GoogleProvider();
-        case Provider.OPENAI:
-            return new ExternalProvider(false);
         case Provider.CUSTOM:
             return new ExternalProvider(true);
         default:
-            return new GoogleProvider();
+            // Fallback to custom/openrouter if type is unknown or legacy
+            return new ExternalProvider(true);
     }
 };

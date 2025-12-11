@@ -93,7 +93,6 @@ const FlowEditor = () => {
     setNodes(nds => nds.map(n => {
         if (n.type === NodeType.START || n.type === NodeType.SOURCE) {
             let providerName = 'Nano Banana';
-            if (appSettings.provider === Provider.OPENAI) providerName = 'OpenAI';
             if (appSettings.provider === Provider.CUSTOM) providerName = 'OpenRouter';
             
             if (n.data.activeProvider !== providerName || n.data.provider !== appSettings.provider) {
@@ -953,7 +952,7 @@ const FlowEditor = () => {
              <div className="p-4 bg-zinc-900/50 border-t border-border flex justify-end">
                 <button 
                   onClick={() => {
-                      localStorage.setItem('nano_banana_settings_v3', JSON.stringify(appSettings));
+                      localStorage.setItem('nano_banana_settings_v4', JSON.stringify(appSettings));
                       setNotification("Settings Saved");
                       setShowSettings(false);
                   }}
